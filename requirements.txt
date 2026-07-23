@@ -1,0 +1,20 @@
+streamlit>=1.38
+openai>=1.40          # OpenAI-compatible client (Groq + Ollama)
+python-dotenv>=1.0
+pydantic>=2.8
+pandas>=2.2
+plotly>=5.22
+pymupdf>=1.24         # fitz - PDF text extraction
+pdf2image>=1.17       # scanned-PDF fallback (needs poppler installed)
+pytesseract>=0.3.13   # OCR fallback (needs tesseract installed)
+
+# Portal + MySQL
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0.43
+pyodbc>=5.1           # SQL Server (default provider)
+pymysql>=1.1         # MySQL fallback provider
+cryptography>=43.0    # MySQL 8 caching_sha2_password auth via PyMySQL
+bcrypt>=4.2
+pyjwt>=2.9
+email-validator>=2.2  # pydantic EmailStr

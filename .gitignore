@@ -1,0 +1,30 @@
+.env
+jobs.json
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.next/
+portal/frontend/out/
+
+# Database records
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+*.ndf
+
+# Logs & Dumps
+*.log
+_pytest_out.txt
+*_dump.txt
+
+# Uploads
+uploads/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

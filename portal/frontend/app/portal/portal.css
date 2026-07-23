@@ -1,0 +1,287 @@
+/* Candidate job-portal styling. Every rule is namespaced under
+   .portal-scope (set on the portal layout root) so it can never leak into the
+   admin dashboard, test, or interview pages that share globals.css. */
+
+.portal-scope {
+  --p-accent: var(--accent);
+  --p-radius: 16px;
+  min-height: 100vh;
+}
+
+/* ---- Top navigation ------------------------------------------------------- */
+.portal-scope .portal-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 28px;
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+  backdrop-filter: saturate(160%) blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.portal-scope .portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-decoration: none;
+}
+.portal-scope .portal-brand .logo {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), #9b8cff);
+  color: #fff;
+  font-size: 16px;
+}
+.portal-scope .portal-nav .links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.portal-scope .portal-nav .links a,
+.portal-scope .portal-nav .links .navlink {
+  padding: 8px 14px;
+  border-radius: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.portal-scope .portal-nav .links a:hover,
+.portal-scope .portal-nav .links .navlink:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.portal-scope .portal-nav .links .cta {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.portal-scope .portal-nav .links .cta:hover {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+.portal-scope .portal-nav .who { font-size: 13px; color: var(--muted); }
+
+/* ---- Hero ----------------------------------------------------------------- */
+.portal-scope .portal-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 56px 28px 44px;
+  text-align: center;
+  background:
+    radial-gradient(1100px 340px at 50% -60px,
+      color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%);
+  border-bottom: 1px solid var(--border);
+}
+.portal-scope .portal-hero h1 {
+  font-size: clamp(30px, 5vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  margin-bottom: 14px;
+}
+.portal-scope .portal-hero p {
+  max-width: 620px;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 17px;
+}
+.portal-scope .hero-search {
+  max-width: 560px;
+  margin: 26px auto 0;
+  position: relative;
+}
+.portal-scope .hero-search input {
+  padding: 14px 16px 14px 44px;
+  border-radius: 999px;
+  font-size: 15px;
+  box-shadow: 0 6px 24px -12px rgba(0,0,0,.4);
+}
+.portal-scope .hero-search .icon {
+  position: absolute;
+  left: 16px; top: 50%; transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* ---- Page shell ----------------------------------------------------------- */
+.portal-scope .portal-main {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+.portal-scope .portal-narrow {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
+}
+.portal-scope .section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.portal-scope .section-title h2 { margin: 0; font-size: 20px; }
+.portal-scope .count-chip { font-size: 13px; color: var(--muted); }
+
+/* ---- Job cards ------------------------------------------------------------ */
+.portal-scope .job-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+.portal-scope .job-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--p-radius);
+  padding: 22px;
+  text-decoration: none;
+  color: var(--text);
+  transition: transform .15s, border-color .15s, box-shadow .15s;
+}
+.portal-scope .job-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 16px 40px -22px rgba(0,0,0,.55);
+}
+.portal-scope .job-card h3 {
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.portal-scope .job-card .team { font-size: 13px; color: var(--accent); font-weight: 600; }
+.portal-scope .meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+.portal-scope .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+.portal-scope .chip.accent {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.portal-scope .job-card .go {
+  align-self: flex-start;
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+/* ---- Generic surface + empty states -------------------------------------- */
+.portal-scope .surface {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--p-radius);
+  padding: 26px;
+  margin-bottom: 16px;
+}
+.portal-scope .empty {
+  text-align: center;
+  padding: 56px 24px;
+  color: var(--muted);
+}
+.portal-scope .empty .big { font-size: 34px; margin-bottom: 10px; }
+
+/* ---- Auth card ------------------------------------------------------------ */
+.portal-scope .auth-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--p-radius);
+  padding: 32px;
+  box-shadow: 0 24px 60px -34px rgba(0,0,0,.6);
+}
+
+/* ---- Application tracking -------------------------------------------------- */
+.portal-scope .track-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.portal-scope .stage-track {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 20px 0 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.portal-scope .stage-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 78px;
+  flex: 1;
+  position: relative;
+}
+.portal-scope .stage-node .dot {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  z-index: 1;
+}
+.portal-scope .stage-node.done .dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.portal-scope .stage-node.current .dot {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.portal-scope .stage-node .name { font-size: 12px; color: var(--muted); }
+.portal-scope .stage-node.done .name,
+.portal-scope .stage-node.current .name { color: var(--text); font-weight: 600; }
+/* connector line between nodes */
+.portal-scope .stage-node::before {
+  content: "";
+  position: absolute;
+  top: 14px; left: -50%; width: 100%;
+  height: 2px; background: var(--border);
+  z-index: 0;
+}
+.portal-scope .stage-node:first-child::before { display: none; }
+.portal-scope .stage-node.done::before,
+.portal-scope .stage-node.current::before { background: var(--accent); }
+
+.portal-scope .sub-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-top: 12px;
+}
+.portal-scope .kv { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 6px; }
+.portal-scope .kv .k { font-size: 12px; color: var(--muted); }
+.portal-scope .kv .v { font-size: 16px; font-weight: 600; }
+
+.portal-scope a.back { font-size: 14px; color: var(--muted); text-decoration: none; }
+.portal-scope a.back:hover { color: var(--text); }
+.portal-scope .jd-body { white-space: pre-wrap; line-height: 1.7; margin-top: 6px; }
