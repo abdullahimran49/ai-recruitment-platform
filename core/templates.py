@@ -40,6 +40,57 @@ DEFAULTS: dict[str, dict] = {
             "duration", "location", "location_line", "notes", "notes_block",
         ],
     },
+    "stage_change": {
+        "label": "Automatic status update notification",
+        "subject": "{{job_title}} — Application Status Update",
+        "body": (
+            "Dear {{candidate_name}},\n\n"
+            "This is to inform you that the status of your application for the "
+            "{{job_title}} position has been updated to: {{stage_name}}.\n\n"
+            "Please log in to your portal dashboard to view the latest details:\n"
+            "{{portal_url}}\n\n"
+            "If you have any questions, please don't hesitate to reach out.\n\n"
+            "Best regards,\nThe Recruiting Team\n"
+        ),
+        "placeholders": [
+            "candidate_name", "job_title", "stage_name", "portal_url",
+        ],
+    },
+    "stage_rejected": {
+        "label": "Rejection notification (sent on stage move to Rejected)",
+        "subject": "{{job_title}} — Application Update",
+        "body": (
+            "Dear {{candidate_name}},\n\n"
+            "Thank you for your interest in the {{job_title}} position and for "
+            "taking the time to go through our selection process.\n\n"
+            "After careful consideration, we regret to inform you that we will "
+            "not be proceeding with your application at this time.\n\n"
+            "We encourage you to apply for future openings that match your "
+            "qualifications. You can check available positions on our portal:\n"
+            "{{portal_url}}\n\n"
+            "We wish you all the best in your career.\n\n"
+            "Best regards,\nThe Recruiting Team\n"
+        ),
+        "placeholders": [
+            "candidate_name", "job_title", "portal_url",
+        ],
+    },
+    "stage_hired": {
+        "label": "Hiring congratulations (sent on stage move to Hired)",
+        "subject": "{{job_title}} — Congratulations!",
+        "body": (
+            "Dear {{candidate_name}},\n\n"
+            "We are delighted to inform you that you have been selected for the "
+            "{{job_title}} position. Congratulations!\n\n"
+            "Please log in to your portal dashboard for further details and "
+            "next steps:\n{{portal_url}}\n\n"
+            "We look forward to welcoming you to the team.\n\n"
+            "Best regards,\nThe Recruiting Team\n"
+        ),
+        "placeholders": [
+            "candidate_name", "job_title", "portal_url",
+        ],
+    },
 }
 
 _TOKEN = re.compile(r"\{\{\s*(\w+)\s*\}\}")

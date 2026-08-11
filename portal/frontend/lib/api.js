@@ -1,4 +1,6 @@
-export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Keep browser requests same-origin.  Next.js proxies /api to the backend,
+// which works both locally and when the portal is opened from another PC.
+export const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function handle(res) {
   if (!res.ok) {
@@ -49,24 +51,44 @@ export function apiUpload(path, file, fieldName, token, fields) {
 
 // Admin session helpers (browser only)
 export function saveAdminSession(data) {
-  localStorage.setItem("ats_admin", JSON.stringify(data));
+  sessionStorage.setItem("ats_admin", JSON.stringify(data));
+  localStorage.removeItem("ats_admin");
 }
 export function adminSession() {
-  try { return JSON.parse(localStorage.getItem("ats_admin") || "null"); }
+  try {
+    const current = sessionStorage.getItem("ats_admin");
+    const legacy = localStorage.getItem("ats_admin");
+    if (!current && legacy) {
+      sessionStorage.setItem("ats_admin", legacy);
+      localStorage.removeItem("ats_admin");
+    }
+    return JSON.parse(sessionStorage.getItem("ats_admin") || "null");
+  }
   catch { return null; }
 }
 export function clearAdminSession() {
+  sessionStorage.removeItem("ats_admin");
   localStorage.removeItem("ats_admin");
 }
 
 // Public job-portal applicant session helpers (browser only)
 export function saveApplicantSession(data) {
-  localStorage.setItem("ats_applicant", JSON.stringify(data));
+  sessionStorage.setItem("ats_applicant", JSON.stringify(data));
+  localStorage.removeItem("ats_applicant");
 }
 export function applicantSession() {
-  try { return JSON.parse(localStorage.getItem("ats_applicant") || "null"); }
+  try {
+    const current = sessionStorage.getItem("ats_applicant");
+    const legacy = localStorage.getItem("ats_applicant");
+    if (!current && legacy) {
+      sessionStorage.setItem("ats_applicant", legacy);
+      localStorage.removeItem("ats_applicant");
+    }
+    return JSON.parse(sessionStorage.getItem("ats_applicant") || "null");
+  }
   catch { return null; }
 }
 export function clearApplicantSession() {
+  sessionStorage.removeItem("ats_applicant");
   localStorage.removeItem("ats_applicant");
 }

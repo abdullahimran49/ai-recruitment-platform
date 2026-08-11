@@ -8,10 +8,14 @@ import { apiSend, saveApplicantSession } from "@/lib/api";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/portal/dashboard";
+  const requestedNext = params.get("next") || "";
+  const next = (requestedNext.startsWith("/portal/")
+                && !requestedNext.startsWith("//"))
+    ? requestedNext : "/portal/dashboard";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -36,8 +40,16 @@ function LoginForm() {
           <input type="email" value={email} required
                  onChange={(e) => setEmail(e.target.value)} />
           <label>Password</label>
-          <input type="password" value={password} required
-                 onChange={(e) => setPassword(e.target.value)} />
+          <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+            <input type={showPassword ? "text" : "password"} value={password} required
+                   onChange={(e) => setPassword(e.target.value)} 
+                   style={{ width: "100%", paddingRight: 40 }} />
+            <button type="button" 
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{ position: "absolute", right: 8, background: "none", border: "none", cursor: "pointer", padding: 4, color: "var(--text-muted)" }}>
+              {showPassword ? "👁️‍🗨️" : "👁️"}
+            </button>
+          </div>
           <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         </form>
         {error && <p className="error">{error}</p>}

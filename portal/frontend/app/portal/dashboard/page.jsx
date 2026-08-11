@@ -173,6 +173,28 @@ export default function Dashboard() {
             </div>
           )}
 
+          {app.human_interview && (
+            <div className="sub-card">
+              <div className="track-head">
+                <strong>Recruiter interview</strong>
+                <span className="pill info">{app.human_interview.status}</span>
+              </div>
+              <p className="muted" style={{ margin: "8px 0 0" }}>
+                {app.human_interview.type?.replace("_", " ")}
+                {app.human_interview.scheduled_at
+                  ? ` · ${fmt(app.human_interview.scheduled_at)}` : ""}
+                {app.human_interview.duration_minutes
+                  ? ` · ${app.human_interview.duration_minutes} min` : ""}
+              </p>
+              {app.human_interview.location && (
+                /^https?:\/\//i.test(app.human_interview.location)
+                  ? <a href={app.human_interview.location} target="_blank"
+                       rel="noopener noreferrer"><button>Open meeting</button></a>
+                  : <p><strong>Location:</strong> {app.human_interview.location}</p>
+              )}
+            </div>
+          )}
+
           {(app.withdrawn || app.can_update_resume || app.can_withdraw) && (
             <div className="actions" style={{ marginTop: 16, paddingTop: 14,
               borderTop: "1px solid var(--border)" }}>

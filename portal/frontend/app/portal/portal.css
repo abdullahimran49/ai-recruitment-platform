@@ -3,9 +3,10 @@
    admin dashboard, test, or interview pages that share globals.css. */
 
 .portal-scope {
-  --p-accent: var(--accent);
+  --p-accent: #005c4a;
   --p-radius: 16px;
   min-height: 100vh;
+  background: #f6faf7;
 }
 
 /* ---- Top navigation ------------------------------------------------------- */
@@ -17,31 +18,22 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 28px;
-  background: color-mix(in srgb, var(--card) 82%, transparent);
+  padding: 12px 32px;
+  background: rgba(255,255,255,.9);
   backdrop-filter: saturate(160%) blur(10px);
   border-bottom: 1px solid var(--border);
 }
 .portal-scope .portal-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 18px;
+  gap: 13px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--text);
   text-decoration: none;
 }
-.portal-scope .portal-brand .logo {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), #9b8cff);
-  color: #fff;
-  font-size: 16px;
-}
+.portal-scope .portal-brand img { display:block; width:102px; height:auto; }.portal-scope .portal-brand .logo { display:none; }
 .portal-scope .portal-nav .links {
   display: flex;
   align-items: center;
@@ -79,12 +71,12 @@
   overflow: hidden;
   padding: 56px 28px 44px;
   text-align: center;
-  background:
-    radial-gradient(1100px 340px at 50% -60px,
-      color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%);
+  background: linear-gradient(112deg,#eff8f2,#e0f0e7 58%,#f9fbf8);
   border-bottom: 1px solid var(--border);
 }
 .portal-scope .portal-hero h1 {
+  color:#073d32;
+  font-family:Georgia,'Times New Roman',serif;
   font-size: clamp(30px, 5vw, 46px);
   line-height: 1.08;
   letter-spacing: -0.03em;
@@ -148,7 +140,7 @@
   gap: 12px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--p-radius);
+  border-radius: 10px;
   padding: 22px;
   text-decoration: none;
   color: var(--text);
@@ -157,7 +149,7 @@
 .portal-scope .job-card:hover {
   transform: translateY(-3px);
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 16px 40px -22px rgba(0,0,0,.55);
+  box-shadow: 0 18px 35px -24px rgba(0,81,63,.48);
 }
 .portal-scope .job-card h3 {
   font-size: 18px;
@@ -197,7 +189,7 @@
 .portal-scope .surface {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--p-radius);
+  border-radius: 10px;
   padding: 26px;
   margin-bottom: 16px;
 }
@@ -214,7 +206,8 @@
   border: 1px solid var(--border);
   border-radius: var(--p-radius);
   padding: 32px;
-  box-shadow: 0 24px 60px -34px rgba(0,0,0,.6);
+  border-top:3px solid var(--accent);
+  box-shadow: 0 24px 60px -34px rgba(0,81,63,.36);
 }
 
 /* ---- Application tracking -------------------------------------------------- */

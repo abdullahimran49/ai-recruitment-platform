@@ -20,6 +20,21 @@ export default function Applications() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [filters, setFilters] = useState({ job_uuid: "", stage_id: "", source: "", q: "" });
 
+  const openResume = async (candidateUuid) => {
+    setError("");
+    try {
+      const response = await fetch(
+        `${API}/api/admin/candidates/${candidateUuid}/resume`,
+        { headers: { Authorization: `Bearer ${session.token}` } });
+      if (!response.ok) {
+        throw new Error(`Could not open resume (${response.status}).`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) { setError(err.message); }
+  };
+
   useEffect(() => {
     const s = adminSession();
     if (!s) { router.replace("/admin"); return; }
@@ -126,6 +141,7 @@ export default function Applications() {
             send tests, and track each person's stage.</p>
         </div>
         <div className="links">
+          <a href={process.env.NEXT_PUBLIC_SCREENING_URL || "http://localhost:8501"} target="_blank" rel="noreferrer"><button className="secondary" style={{marginRight: 8}}>Screening Portal</button></a>
           <Link href="/admin/dashboard"><button className="secondary">← Dashboard</button></Link>
         </div>
       </div>
@@ -225,10 +241,8 @@ export default function Applications() {
                     <td>
                       <div className="actions">
                         {a.has_resume ? (
-                          <a href={`${API}/api/admin/candidates/${a.uuid}/resume?token=${encodeURIComponent(session.token)}`}
-                             target="_blank" rel="noreferrer">
-                            <button className="mini secondary">📄 Resume</button>
-                          </a>
+                          <button className="mini secondary"
+                                  onClick={() => openResume(a.uuid)}>Resume</button>
                         ) : (
                           <span className="muted" style={{ fontSize: 12 }}>no PDF</span>
                         )}

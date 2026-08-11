@@ -19,14 +19,17 @@ from schemas import MCQTest, ResumeResult
 PORTAL_BASE_URL = os.getenv("PORTAL_BASE_URL", "http://localhost:3000").rstrip("/")
 
 
-def list_departments() -> list[tuple[int, str]]:
+def list_departments(department_id: int | None = None) -> list[tuple[int, str]]:
     from core.models import Department
     with session() as s:
+        query = select(Department)
+        if department_id is not None:
+            query = query.where(Department.id == department_id)
         return [(d.id, d.name)
-                for d in s.execute(select(Department)).scalars().all()]
+                for d in s.execute(query).scalars().all()]
 
 
-def list_saved_jobs() -> dict:
+def list_saved_jobs(department_id: int | None = None) -> dict:
     """Return {job_title: {jd, must, nice, settings, penalties, department_id,
     department_name}} for every job in the database, newest first.
 
@@ -35,8 +38,11 @@ def list_saved_jobs() -> dict:
     """
     out: dict = {}
     with session() as s:
+        query = select(Job)
+        if department_id is not None:
+            query = query.where(Job.department_id == department_id)
         jobs = s.execute(
-            select(Job).order_by(Job.created_at.desc())).scalars().all()
+            query.order_by(Job.created_at.desc())).scalars().all()
         for j in jobs:
             cfg = j.criteria_json or {}
             out[j.title] = {
@@ -101,7 +107,7 @@ def load_job_resume_files(job_uuid: str) -> tuple[list, int]:
     return files, n_hidden
 
 
-def delete_job_by_title(title: str) -> None:
+def delete_job_by_title(title: str, department_id: int | None = None) -> None:
     """Delete a job and every dependent row, by title.
 
     Delegates to the shared cascade (core/job_delete.py): this used to be a
@@ -112,8 +118,10 @@ def delete_job_by_title(title: str) -> None:
     from core.job_delete import cascade_delete_job
 
     with session() as s:
-        job = s.execute(select(Job).where(
-            Job.title == title)).scalars().first()
+        query = select(Job).where(Job.title == title)
+        if department_id is not None:
+            query = query.where(Job.department_id == department_id)
+        job = s.execute(query).scalars().first()
         if job is None:
             return
         cascade_delete_job(s, job)

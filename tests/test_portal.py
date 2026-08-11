@@ -124,7 +124,7 @@ def test_register_and_login(client, make_applicant):
     r = client.post("/api/portal/login",
                     json={"email": a["email"], "password": a["password"]})
     assert r.status_code == 200, r.text
-    assert r.json()["applicant"]["cnic"] == a["cnic"]
+    assert r.json()["applicant"]["cnic"] == f"*********{a['cnic'][-4:]}"
     # wrong password
     bad = client.post("/api/portal/login",
                       json={"email": a["email"], "password": "nope"})

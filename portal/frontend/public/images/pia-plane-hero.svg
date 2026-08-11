@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" role="img" aria-labelledby="title desc">
+  <title id="title">Pakistan International Airlines inspired passenger jet</title>
+  <desc id="desc">A white and green passenger plane flying above clouds.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#9ccfdf"/><stop offset=".58" stop-color="#dceff0"/><stop offset="1" stop-color="#f8fbf8"/></linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff"/><stop offset=".62" stop-color="#f5f7f3"/><stop offset="1" stop-color="#cfd9d4"/></linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef3ef"/><stop offset="1" stop-color="#aabbb3"/></linearGradient>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="160%"><feGaussianBlur stdDeviation="15"/></filter>
+  </defs>
+  <rect width="1400" height="900" fill="url(#sky)"/>
+  <g opacity=".45" fill="#fff"><path d="M-50 662c98-95 219-71 304-2 89-94 249-77 317 17 83-94 225-79 293 17 99-132 277-109 372-11 61-62 142-64 216-24v241H-50Z"/><path d="M-70 749c124-89 252-47 348 31 114-113 304-97 391 8 112-94 270-103 397 11 96-71 254-53 391 30v126H-70Z" opacity=".8"/></g>
+  <ellipse cx="737" cy="591" rx="428" ry="70" fill="#33685d" opacity=".22" filter="url(#shadow)"/>
+  <g transform="rotate(-7 700 450)">
+    <path d="M287 463c13-55 75-92 175-105l532-60c137-16 217 1 261 49l79 84-79 46-141-22-200 76-78 165-107 13 51-180-264 27-75 105-112 15 65-118-87-32c-38-14-57-36-52-60Z" fill="url(#wing)" stroke="#91a89e" stroke-width="5"/>
+    <path d="M276 453c21-54 95-80 193-87l554-49c125-12 204 6 247 54 19 21 34 43 48 68-70 41-164 62-277 65l-564 16c-102 2-167-11-201-37-18-14-19-20 0-30Z" fill="url(#body)" stroke="#92a9a0" stroke-width="5"/>
+    <path d="M1081 327c65-5 114 9 149 44l81 71-76 38-85-83Z" fill="#005c4a"/>
+    <path d="M1104 334c50 0 88 12 114 35l-33 18c-26-15-53-23-82-24Z" fill="#c9a35c" opacity=".9"/>
+    <path d="M284 452c43 25 111 37 199 35l561-16c103-3 194-20 274-52" fill="none" stroke="#00614e" stroke-width="17"/>
+    <path d="M309 470c44 22 103 33 174 33l560-17c98-2 185-18 261-46" fill="none" stroke="#c9a35c" stroke-width="5"/>
+    <g fill="#4d6b64"><rect x="545" y="386" width="22" height="16" rx="7"/><rect x="581" y="382" width="22" height="16" rx="7"/><rect x="617" y="378" width="22" height="16" rx="7"/><rect x="653" y="375" width="22" height="16" rx="7"/><rect x="689" y="372" width="22" height="16" rx="7"/><rect x="725" y="369" width="22" height="16" rx="7"/><rect x="761" y="366" width="22" height="16" rx="7"/><rect x="797" y="363" width="22" height="16" rx="7"/><rect x="833" y="360" width="22" height="16" rx="7"/><rect x="869" y="357" width="22" height="16" rx="7"/><rect x="905" y="354" width="22" height="16" rx="7"/></g>
+    <text x="423" y="452" fill="#005c4a" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" letter-spacing="3">PIA</text>
+    <path d="M1138 354a16 16 0 1 0 16 25 19 19 0 1 1-16-25Z" fill="#fff"/>
+    <circle cx="1167" cy="359" r="5" fill="#c9a35c"/>
+    <ellipse cx="490" cy="527" rx="66" ry="29" fill="#6f8980" stroke="#879f96" stroke-width="5"/><ellipse cx="492" cy="521" rx="47" ry="20" fill="#314f48"/><ellipse cx="947" cy="485" rx="58" ry="25" fill="#6f8980" stroke="#879f96" stroke-width="5"/><ellipse cx="948" cy="480" rx="41" ry="17" fill="#314f48"/>
+  </g>
+</svg>

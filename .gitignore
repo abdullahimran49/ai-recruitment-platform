@@ -28,3 +28,18 @@ uploads/
 .vscode/
 .idea/
 .DS_Store
+
+# Fix / migration helper scripts (not part of the app)
+update_fix*.py
+fix_*.py
+add_col.py
+create_test_iv.py
+
+# Binary docs & images (not source code)
+*.docx
+*.jpg
+*.png
+
+# Antigravity / agent config
+.agents/
+.gemini/

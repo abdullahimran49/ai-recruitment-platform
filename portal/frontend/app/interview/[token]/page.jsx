@@ -1,9 +1,8 @@
 "use client";
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { apiGet, apiSend } from "@/lib/api";
+import { API, apiGet, apiSend } from "@/lib/api";
 import { Proctor } from "@/lib/proctor";
-import { Room, RoomEvent, Track } from "livekit-client";
 
 const VIOLATION_LABELS = {
   no_face: "Your face is not visible",
@@ -49,7 +48,7 @@ export default function InterviewPage({ params }) {
   const [remaining, setRemaining] = useState(0);
   const [countdown, setCountdown] = useState("");
 
-  // LiveKit state
+  // live interview connection state
   const [roomConnected, setRoomConnected] = useState(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
 
@@ -57,8 +56,9 @@ export default function InterviewPage({ params }) {
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   const finishedRef = useRef(false);
+  const leavingRef = useRef(false);
   const roomRef = useRef(null);
-  const audioBoxRef = useRef(null);   // holds one <audio> per remote track
+
   const chatEndRef = useRef(null);
   const warningsRef = useRef(0);      // last server-confirmed warning count
   const sessionKey = `ats_interview_${token}`;
@@ -138,7 +138,7 @@ export default function InterviewPage({ params }) {
     if (finishedRef.current) return;
     finishedRef.current = true;
     proctorRef.current?.stop();
-    try { roomRef.current?.disconnect(); } catch {}
+    try { roomRef.current?.close(); } catch {}
     proctorRef.current?.destroy();
     document.exitFullscreen?.().catch(() => {});
     sessionStorage.removeItem(sessionKey);
@@ -159,10 +159,24 @@ export default function InterviewPage({ params }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, cleanupAndShow]);
 
-  const doLeave = useCallback(() => {
-    // Voluntary exit — not a violation. The agent finalizes server-side.
-    cleanupAndShow("done");
-  }, [cleanupAndShow]);
+  const doLeave = useCallback(async () => {
+    if (finishedRef.current || leavingRef.current) return;
+    leavingRef.current = true;
+    setLiveText("Saving and completing your interview…");
+    try {
+      const ws = roomRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "finish" }));
+      }
+      await apiSend(`/api/portal/interview/${token}/finish`, "POST",
+                    { terminated_reason: null }, authRef.current);
+      cleanupAndShow("done");
+    } catch {
+      leavingRef.current = false;
+      setCheckErr("We could not confirm completion. Your answers are saved; "
+                  + "please reconnect and try again.");
+    }
+  }, [token, cleanupAndShow]);
 
   const reportViolation = useCallback(async (type, detail, evidence) => {
     try {
@@ -195,7 +209,8 @@ export default function InterviewPage({ params }) {
       setRemaining((r) => {
         if (r <= 1) {
           clearInterval(iv);
-          failsafe = setTimeout(() => doLeave(), 120000);
+          failsafe = setTimeout(() => doLeave(), 5000);
+          doLeave();
           return 0;
         }
         return r - 1;
@@ -311,80 +326,238 @@ export default function InterviewPage({ params }) {
                 evidence: p.snapshot() },
               authRef.current).catch(() => {});
 
-      // Call the /join endpoint to get LiveKit credentials
+      // Start or resume the server-side interview session.
       const r = await apiSend(`/api/portal/interview/${token}/join`, "POST",
                               undefined, authRef.current);
       setRemaining(r.remaining_seconds);
       setWarnings(r.warnings || 0);
       warningsRef.current = r.warnings || 0;
 
-      // Connect to LiveKit room
-      const room = new Room();
-      roomRef.current = room;
+      setMessages([]);
+      setLiveText("");
+      // Connect to the checkpointed interview WebSocket.
+      const baseApi = (typeof API === "string" && API.startsWith("http")) ? API : window.location.origin;
+      const wsUrl = new URL(r.ws_url, baseApi);
+      wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
+      
+      const ws = new WebSocket(wsUrl);
+      roomRef.current = ws;
 
-      // Play every remote audio track (agent voice, and the recruiter if
-      // they unmute) through its own element.
-      room.on(RoomEvent.TrackSubscribed, (track) => {
-        if (track.kind === Track.Kind.Audio && audioBoxRef.current) {
-          audioBoxRef.current.appendChild(track.attach());
+      let synthVoices = window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => { 
+          synthVoices = window.speechSynthesis.getVoices(); 
+      };
+
+      let agentIsSpeakingNow = true;
+      let listeningEnabled = false;
+      let agentSpeechTimeout = null;
+      let listeningTimer = null;
+      let stopActiveRecording = () => {};
+      let disposeVoiceCapture = () => {};
+      let agentTurn = 0;
+      let serverCompleted = false;
+
+      // Do not let the microphone VAD run until browser TTS has completed.
+      // This is deliberately independent of speechSynthesis.speaking, which
+      // can remain true forever in Chromium after an utterance has ended.
+      const beginListeningAfterEchoDrain = () => {
+        clearTimeout(listeningTimer);
+        agentIsSpeakingNow = false;
+        setAgentSpeaking(false);
+        // Give acoustic echo cancellation a short tail to settle.  Without
+        // this, speakers can trigger a recording from Nova's final word.
+        listeningTimer = setTimeout(() => { listeningEnabled = true; }, 450);
+      };
+
+      const beginAgentTurn = () => {
+        agentTurn += 1;
+        listeningEnabled = false;
+        agentIsSpeakingNow = true;
+        setAgentSpeaking(true);
+        clearTimeout(listeningTimer);
+        stopActiveRecording(true);
+      };
+
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "notice") {
+          setLiveText(msg.message || "Please try speaking again.");
+          return;
         }
-      });
-
-      room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        track.detach().forEach((el) => el.remove());
-      });
-
-      // Handle transcriptions for live captions. The same final segment can
-      // be delivered twice (legacy protocol + text streams) — dedupe by id.
-      const seenSegs = new Set();
-      room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
-        for (const seg of segments) {
-          if (!seg.text?.trim()) continue;
-          const role = participant?.identity?.startsWith("candidate")
-            ? "candidate" : "interviewer";
-          if (seg.final) {
-            if (seenSegs.has(seg.id)) continue;
-            seenSegs.add(seg.id);
-            setMessages((prev) => [...prev, { role, text: seg.text }]);
-            setLiveText("");
-          } else {
-            setLiveText(seg.text);
+        if (msg.type === "error") {
+          setCheckErr(msg.message || "The connection had a problem.");
+          return;
+        }
+        if (msg.type === "complete") {
+          serverCompleted = true;
+          cleanupAndShow("done");
+          return;
+        }
+        if (msg.type === "transcript") {
+          setMessages((prev) => [...prev, { role: msg.role, text: msg.text }]);
+          
+          if (msg.role === "interviewer" && !msg.historical) {
+            beginAgentTurn();
+            const thisTurn = agentTurn;
+            clearTimeout(agentSpeechTimeout);
+            // Failsafe in case TTS never calls onend. This only unlocks the
+            // mic; it never consults the unreliable browser `speaking` flag.
+            agentSpeechTimeout = setTimeout(() => {
+                if (thisTurn === agentTurn) beginListeningAfterEchoDrain();
+            }, Math.max(4000, msg.text.length * 85 + 2500));
+            
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(msg.text);
+            const locale = msg.tts_locale || "en-US";
+            const localeLower = locale.toLowerCase();
+            const baseLanguage = localeLower.split("-")[0];
+            u.lang = locale;
+            const matchingVoices = synthVoices.filter((v) => {
+              const lang = (v.lang || "").toLowerCase();
+              return lang === localeLower || lang.startsWith(`${baseLanguage}-`)
+                || lang === baseLanguage;
+            });
+            const voice = matchingVoices.find((v) =>
+              /google|natural|microsoft|neural|nova/i.test(v.name))
+              || matchingVoices[0];
+            if (voice) u.voice = voice;
+            u.rate = 1.05;
+            u.onend = () => { if (thisTurn === agentTurn) { clearTimeout(agentSpeechTimeout); beginListeningAfterEchoDrain(); } };
+            u.onerror = () => { if (thisTurn === agentTurn) { clearTimeout(agentSpeechTimeout); beginListeningAfterEchoDrain(); } };
+            window.speechSynthesis.speak(u);
           }
         }
-      });
-
-      // Track when agent is speaking
-      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-        const agentActive = speakers.some(
-          (s) => !s.identity?.startsWith("candidate") && !s.identity?.startsWith("admin")
-        );
-        setAgentSpeaking(agentActive);
-      });
-
-      room.on(RoomEvent.Disconnected, () => {
+      };
+      
+      ws.onclose = () => {
+        disposeVoiceCapture();
+        clearTimeout(agentSpeechTimeout);
+        clearTimeout(listeningTimer);
+        window.speechSynthesis.cancel();
         setRoomConnected(false);
-        // The agent closed the room (interview over) — it saves and emails.
-        if (!finishedRef.current) cleanupAndShow("done");
-      });
+        if (!finishedRef.current && !serverCompleted) {
+          proctorRef.current?.stop();
+          proctorRef.current?.destroy();
+          document.exitFullscreen?.().catch(() => {});
+          phaseRef.current = "syscheck";
+          setCheckErr("Connection interrupted. Your answers were saved. Run "
+                      + "the check again to resume where you left off.");
+          setPhase("syscheck");
+        }
+      };
+      
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "authenticate",
+                                 token: authRef.current }));
+        setRoomConnected(true);
+      };
 
-      // Connect to the room
-      await room.connect(r.livekit_url, r.livekit_token);
-      setRoomConnected(true);
-
-      // Publish the proctor engine's camera + mic tracks into the room
       const camStream = p.camStream;
-      if (camStream) {
+      if (camStream && camStream.getAudioTracks().length > 0) {
         const audioTrack = camStream.getAudioTracks()[0];
-        const videoTrack = camStream.getVideoTracks()[0];
-        if (audioTrack) {
-          await room.localParticipant.publishTrack(audioTrack, { name: "mic", source: Track.Source.Microphone });
-        }
-        if (videoTrack) {
-          await room.localParticipant.publishTrack(videoTrack, { name: "camera", source: Track.Source.Camera });
-        }
-      }
+        const audioStream = new MediaStream([audioTrack]);
 
-      setPhase("interview");
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(audioStream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+
+        await audioContext.resume().catch(() => {});
+        let silenceStart = 0;
+        let speechHits = 0;
+        let vadFrame;
+        let activeRecording = null;
+
+        const rmsLevel = () => {
+          const samples = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(samples);
+          let energy = 0;
+          for (const sample of samples) {
+            const value = (sample - 128) / 128;
+            energy += value * value;
+          }
+          return Math.sqrt(energy / samples.length);
+        };
+
+        const finishRecording = (discard = false) => {
+          const recording = activeRecording;
+          if (!recording) return;
+          activeRecording = null;
+          recording.discard ||= discard;
+          if (recording.recorder.state === "recording") recording.recorder.stop();
+        };
+        stopActiveRecording = finishRecording;
+
+        const startRecording = () => {
+          const recording = {
+            startedAt: Date.now(), speechMs: 0, discard: false, recorder: null,
+          };
+          try {
+            const options = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+              ? { mimeType: "audio/webm;codecs=opus" } : undefined;
+            const rec = new MediaRecorder(audioStream, options);
+            recording.recorder = rec;
+            rec.ondataavailable = (e) => {
+              const durationMs = Date.now() - recording.startedAt;
+              // Only send a confirmed, candidate turn. Metadata gives the
+              // server a second guard against silence hallucinations.
+              if (!recording.discard && listeningEnabled
+                  && durationMs >= 900 && recording.speechMs >= 350
+                  && e.data.size >= 4000 && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "audio", duration_ms: durationMs,
+                  speech_ms: recording.speechMs }));
+                ws.send(e.data);
+              }
+            };
+            rec.start();
+          } catch (e) {
+            console.error("MediaRecorder error:", e);
+            activeRecording = null;
+            return;
+          }
+          activeRecording = recording;
+        };
+
+        const checkAudio = () => {
+          if (phaseRef.current !== "interview") return;
+          
+          if (agentIsSpeakingNow || !listeningEnabled) {
+             speechHits = 0;
+             silenceStart = 0;
+             finishRecording(true);
+          } else {
+             const level = rmsLevel();
+             // Hysteresis avoids starting/stopping on individual noisy frames.
+             if (level >= 0.025) {
+                speechHits += 1;
+                silenceStart = 0;
+                if (!activeRecording && speechHits >= 4) startRecording();
+                if (activeRecording) activeRecording.speechMs += 16;
+             } else {
+                speechHits = Math.max(0, speechHits - 1);
+                if (activeRecording) {
+                  if (!silenceStart) silenceStart = Date.now();
+                  if (Date.now() - silenceStart >= 1100) finishRecording();
+                }
+             }
+          }
+          vadFrame = requestAnimationFrame(checkAudio);
+        };
+        disposeVoiceCapture = () => {
+          cancelAnimationFrame(vadFrame);
+          finishRecording(true);
+          audioContext.close().catch(() => {});
+        };
+        // State updates are asynchronous. Set the ref first so the first VAD
+        // frame is not accidentally dropped while React commits the UI.
+        phaseRef.current = "interview";
+        setPhase("interview");
+        checkAudio();
+      }
+      else {
+        throw new Error("No microphone track is available. Please re-run the camera and microphone check.");
+      }
     } catch (err) {
       if (err.status === 401) {
         sessionStorage.removeItem(sessionKey);
@@ -457,6 +630,11 @@ export default function InterviewPage({ params }) {
                 <div className="v">~{info.duration_minutes}<span style={{ fontSize: 13, fontWeight: 500 }}> min</span></div>
               </div>
             </div>
+            <p className="muted" style={{ marginTop: 12 }}>
+              <strong>Languages:</strong>{" "}
+              {(info.languages || [{ label: "English" }])
+                .map((language) => language.label).join(", ")}
+            </p>
             {info.window === "too_early" && (
               <p className="muted" style={{ marginTop: 12 }}>⏳ The room opens 10
                 minutes before your slot. Verify your identity now to be ready.</p>
@@ -521,6 +699,8 @@ export default function InterviewPage({ params }) {
             <h1>Interview check</h1>
             <p className="muted">
               An AI voice will interview you. Speak your answers naturally.
+              You may use {(info?.languages || [{ label: "English" }])
+                .map((language) => language.label).join(", ")}.{" "}
               Stay in fullscreen, alone, facing the camera. {maxWarnings}{" "}
               violations end the interview.
             </p>
@@ -571,6 +751,14 @@ export default function InterviewPage({ params }) {
                       if (confirm("End the interview early? Your answers so "
                                   + "far will be evaluated.")) doLeave();
                     }}>Leave Interview</button>
+            <button className="primary"
+                    style={{ float: "right", margin: "-4px 8px 0 0",
+                             padding: "4px 8px", fontSize: "0.8em" }}
+                    onClick={() => {
+                      if (roomRef.current?.readyState === WebSocket.OPEN) {
+                        roomRef.current.send(JSON.stringify({ type: "next_question" }));
+                      }
+                    }}>Next Question</button>
           </div>
 
           {violation && (
@@ -583,6 +771,15 @@ export default function InterviewPage({ params }) {
           )}
 
           <div className="card" style={{ minHeight: 300 }}>
+            {messages.length === 0 && roomConnected && (
+              <div style={{ margin: "40px 0", textAlign: "center", opacity: 0.8 }}>
+                <div style={{ fontSize: "2rem", marginBottom: "10px" }}>✨</div>
+                <p style={{ fontStyle: "italic", fontSize: "1.1rem" }}>
+                  Nova is reviewing your profile and getting ready to speak...<br/>
+                  Please wait a moment.
+                </p>
+              </div>
+            )}
             {messages.map((m, i) => (
               <p key={i} style={{ margin: "10px 0" }}>
                 <strong>{m.role === "interviewer" ? "🎙 Interviewer" : "🧑 You"}:
@@ -597,7 +794,7 @@ export default function InterviewPage({ params }) {
             <div ref={chatEndRef} />
           </div>
 
-          <div ref={audioBoxRef} style={{ display: "none" }} />
+
 
           {fsLost && (
             <div style={{

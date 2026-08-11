@@ -39,12 +39,15 @@ class LLMError(Exception):
 # Rolling 60s windows for both tokens and requests. Before each call we wait
 # until the estimated cost fits under the (safety-scaled) caps.
 
+import threading
+
 class _RateLimiter:
     def __init__(self):
         self._tokens = deque()   # (timestamp, token_count)
         self._reqs = deque()     # timestamps
         self.tpm = int(config.TPM_LIMIT * config.TPM_SAFETY_FRACTION)
         self.rpm = config.RPM_LIMIT
+        self.lock = threading.Lock()
 
     def _prune(self, now):
         while self._tokens and now - self._tokens[0][0] > 60:
@@ -54,21 +57,32 @@ class _RateLimiter:
 
     def acquire(self, est_tokens):
         while True:
-            now = time.time()
-            self._prune(now)
-            used = sum(t for _, t in self._tokens)
-            if used + est_tokens <= self.tpm and len(self._reqs) < self.rpm:
-                return
-            # Sleep until the oldest relevant entry ages out of the window.
-            oldest = self._tokens[0][0] if self._tokens else now
-            if self._reqs:
-                oldest = min(oldest, self._reqs[0])
-            time.sleep(max(0.5, 60 - (now - oldest) + 0.1))
+            with self.lock:
+                now = time.time()
+                self._prune(now)
+                used = sum(t for _, t in self._tokens)
+                
+                # If a single request asks for more than the entire TPM limit,
+                # allow it through ONLY when the token bucket is completely empty.
+                if est_tokens >= self.tpm:
+                    if used == 0 and len(self._reqs) < self.rpm:
+                        return
+                else:
+                    if used + est_tokens <= self.tpm and len(self._reqs) < self.rpm:
+                        return
+                        
+                # Sleep until the oldest relevant entry ages out of the window.
+                oldest = self._tokens[0][0] if self._tokens else now
+                if self._reqs:
+                    oldest = min(oldest, self._reqs[0])
+                wait_time = max(0.5, 60 - (now - oldest) + 0.1)
+            time.sleep(wait_time)
 
     def record(self, tokens):
-        now = time.time()
-        self._tokens.append((now, tokens))
-        self._reqs.append(now)
+        with self.lock:
+            now = time.time()
+            self._tokens.append((now, tokens))
+            self._reqs.append(now)
 
 
 _limiter = _RateLimiter()
@@ -124,8 +138,22 @@ def chat_json(system: str, user: str, temperature: float | None = None,
     )
 
 
+def chat_text(messages: list[dict], temperature: float | None = None,
+              max_tokens: int | None = None) -> str:
+    """Generate conversational text with Groq -> local Ollama fallback.
+
+    Unlike batch/scoring calls, this intentionally does not wait behind the
+    minute-long local rate limiter: a live interview must fall back promptly
+    when Groq returns 429 or is unavailable.
+    """
+    content, _used = _call_with_backoff(
+        messages, max_retries=2, temperature=temperature,
+        max_tokens=max_tokens, json_mode=False)
+    return content
+
+
 def _call_with_backoff(messages, max_retries=4, temperature=None,
-                       max_tokens=None):
+                       max_tokens=None, json_mode=True):
     """Call the chat endpoint, retrying with backoff on 429/transient errors.
 
     If Groq rate limits are exhausted and a fallback client is available,
@@ -138,14 +166,16 @@ def _call_with_backoff(messages, max_retries=4, temperature=None,
     delay = 2.0
     for i in range(max_retries):
         try:
-            resp = _client.chat.completions.create(
+            kwargs = dict(
                 model=config.MODEL,
                 messages=messages,
                 temperature=temp,
                 max_tokens=out_budget,
-                response_format={"type": "json_object"},
                 timeout=config.REQUEST_TIMEOUT,
             )
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            resp = _client.chat.completions.create(**kwargs)
             content = resp.choices[0].message.content or ""
             used = getattr(resp, "usage", None)
             total = used.total_tokens if used else 0
@@ -154,33 +184,41 @@ def _call_with_backoff(messages, max_retries=4, temperature=None,
             if i == max_retries - 1:
                 if _fallback_client:
                     return _try_fallback(messages, temperature=temp,
-                                         max_tokens=out_budget)
+                                         max_tokens=out_budget,
+                                         json_mode=json_mode)
                 raise LLMError("Rate limit hit; retries exhausted. Try again "
                                "later or switch LLM_PROVIDER=ollama.")
             time.sleep(delay)
             delay *= 2
         except APIError as e:
             if i == max_retries - 1:
+                if _fallback_client:
+                    return _try_fallback(messages, temperature=temp,
+                                         max_tokens=out_budget,
+                                         json_mode=json_mode)
                 raise LLMError(f"LLM API error: {e}") from e
             time.sleep(delay)
             delay *= 2
     raise LLMError("Unreachable")
 
 
-def _try_fallback(messages, temperature=None, max_tokens=None):
+def _try_fallback(messages, temperature=None, max_tokens=None,
+                  json_mode=True):
     """Attempt a single call via the local Ollama fallback client."""
     global _fallback_was_used
     temp = config.TEMPERATURE if temperature is None else temperature
     out_budget = max_tokens or config.MAX_OUTPUT_TOKENS
     try:
-        resp = _fallback_client.chat.completions.create(
+        kwargs = dict(
             model=config.FALLBACK_MODEL,
             messages=messages,
             temperature=temp,
             max_tokens=out_budget,
-            response_format={"type": "json_object"},
             timeout=config.REQUEST_TIMEOUT,
         )
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = _fallback_client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content or ""
         used = getattr(resp, "usage", None)
         total = used.total_tokens if used else 0
@@ -188,7 +226,7 @@ def _try_fallback(messages, temperature=None, max_tokens=None):
         return content, total
     except Exception as e:  # noqa: BLE001
         raise LLMError(
-            f"Groq rate limit exceeded and Ollama fallback failed: {e}. "
+            f"Groq request failed and Ollama fallback also failed: {e}. "
             "Ensure Ollama is running (ollama serve) with the model pulled."
         ) from e
 

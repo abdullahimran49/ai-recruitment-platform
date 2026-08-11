@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timedelta
 
 from core import mailer
+from core.interview_languages import configured_languages
 from core.models import AIInterview
 
 _log = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ def _cfg(job) -> dict:
         "delay_hours": int(cfg.get("auto_invite_delay_hours", 48)),
         "duration": int(cfg.get("auto_invite_duration_minutes", 20)),
         "num_questions": int(cfg.get("auto_invite_num_questions", 5)),
+        "languages": configured_languages(cfg.get("auto_invite_languages")),
     }
 
 
@@ -110,7 +112,7 @@ def maybe_auto_invite(db, assignment, portal_base: str) -> dict:
                          scheduled_at=sched,
                          duration_minutes=cfg["duration"],
                          num_questions=cfg["num_questions"],
-                         focus="")
+                         focus="", languages=cfg["languages"])
         db.add(iv)
         db.flush()
 

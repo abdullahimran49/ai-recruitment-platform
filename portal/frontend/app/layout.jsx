@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "ATS Assessment Portal",
+  title: "PIA Careers — ATS Assessment Portal",
   description: "Candidate assessments and recruiting administration",
 };
 

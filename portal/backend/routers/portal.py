@@ -23,8 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 import pdf
-from core import mailer, security
-from core.models import (AIInterview, Applicant, Candidate, Job, Otp,
+from core import mailer, otps, security
+from core.models import (AIInterview, Applicant, Candidate, Job,
                          PipelineStage, TestAssignment)
 from core.screening import screen_resume_for_job
 from portal.backend.deps import current_applicant, get_db
@@ -132,14 +132,15 @@ def _valid_email(email: str) -> bool:
 
 def _applicant_out(a: Applicant) -> dict:
     return {"uuid": a.uuid, "name": a.name, "email": a.email,
-            "cnic": a.cnic, "phone": a.phone}
+            "cnic": security.masked_cnic(a.cnic), "phone": a.phone}
 
 
 @router.post("/register")
 def register(body: RegisterIn, db=Depends(get_db)):
-    cnic = _norm_cnic(body.cnic)
-    if len(cnic) != 13:
+    cnic_digits = _norm_cnic(body.cnic)
+    if len(cnic_digits) != 13:
         raise HTTPException(422, "CNIC must be 13 digits")
+    cnic = security.protect_cnic(cnic_digits)
     email = body.email.strip().lower()
     if not _valid_email(email):
         raise HTTPException(422, "Enter a valid email address")
@@ -318,13 +319,9 @@ def forgot_password(body: ForgotIn, db=Depends(get_db)):
     applicant = db.execute(select(Applicant).where(
         Applicant.email == email)).scalars().first()
     if applicant:
-        window = datetime.utcnow() - timedelta(minutes=10)
-        recent = db.execute(select(Otp).where(
-            Otp.email == email, Otp.created_at > window)).scalars().all()
-        if len(recent) < 5:  # simple rate limit
-            code = security.generate_otp()
-            db.add(Otp(email=email, code_hash=security.hash_otp(code, email),
-                       expires_at=security.otp_expiry()))
+        if otps.recent_count(db, email, otps.PASSWORD_RESET,
+                             applicant.uuid, 10) < 5:
+            code = otps.issue(db, email, otps.PASSWORD_RESET, applicant.uuid)
             try:
                 mailer.send_email(
                     email, "Reset your password",
@@ -348,17 +345,16 @@ def reset_password(body: ResetIn, db=Depends(get_db)):
     email = body.email.strip().lower()
     applicant = db.execute(select(Applicant).where(
         Applicant.email == email)).scalars().first()
-    otp = db.execute(
-        select(Otp).where(Otp.email == email, Otp.used == False)  # noqa: E712
-        .order_by(Otp.id.desc())).scalars().first()
-    if not applicant or not otp or datetime.utcnow() > otp.expires_at:
+    if not applicant:
         raise HTTPException(400, "Invalid or expired code — request a new one.")
-    if otp.attempts >= security.OTP_MAX_ATTEMPTS:
+    ok, reason = otps.verify(
+        db, email, body.code, otps.PASSWORD_RESET, applicant.uuid)
+    if reason == "attempts":
         raise HTTPException(429, "Too many attempts — request a new code.")
-    otp.attempts += 1
-    if security.hash_otp(body.code.strip(), email) != otp.code_hash:
+    if reason == "expired":
+        raise HTTPException(400, "Invalid or expired code — request a new one.")
+    if not ok:
         raise HTTPException(400, "Incorrect code.")
-    otp.used = True
     applicant.password_hash = security.hash_password(body.new_password)
     # Sign them straight in so they don't have to log in again.
     return {"reset": True, "token": security.applicant_token(applicant.uuid),
@@ -411,12 +407,37 @@ def withdraw_application(candidate_uuid: str,
     cand = _owned_application(db, applicant, candidate_uuid)
     if cand.status == "withdrawn":
         return {"withdrawn": True}
+    now = datetime.utcnow()
+    # Revoke every pending downstream invitation. A withdrawn candidate must
+    # not retain a working assessment or interview link.
+    for assignment in cand.assignments:
+        if (assignment.superseded_at is None
+                and assignment.status not in ("submitted", "terminated")):
+            assignment.superseded_at = now
+            assignment.superseded_by = f"candidate:{applicant.uuid}"
+            assignment.reset_reason = "Application withdrawn by candidate"
+    for ai_interview in cand.interviews_ai:
+        if ai_interview.status in ("scheduled", "started"):
+            ai_interview.status = "cancelled"
+            ai_interview.completed_at = now
+            ai_interview.terminated_reason = "Application withdrawn"
+    for human_interview in cand.interviews:
+        if human_interview.status == "scheduled":
+            human_interview.status = "cancelled"
     cand.status = "withdrawn"
     rejected = db.execute(select(PipelineStage).where(
         PipelineStage.department_id.is_(None),
         PipelineStage.name == "Rejected")).scalars().first()
     if rejected:
         cand.stage_id = rejected.id
+    try:
+        mailer.send_email(
+            applicant.email, f"Application withdrawn — {cand.job.title}",
+            f"Hi {applicant.name or 'there'},\n\nYour application for the "
+            f"{cand.job.title} role has been withdrawn. Any pending assessment "
+            "or interview invitation for this application has been cancelled.\n")
+    except Exception:
+        pass
     return {"withdrawn": True}
 
 
@@ -441,14 +462,31 @@ def _application_view(cand: Candidate) -> dict:
         }
 
     interview = None
-    ivs = sorted(cand.interviews_ai, key=lambda i: i.scheduled_at or datetime.min)
+    ivs = sorted(cand.interviews_ai, key=lambda i: i.created_at or datetime.min)
     if ivs:
-        iv = ivs[-1]
+        active_ivs = [i for i in ivs if i.status != "cancelled"]
+        iv = active_ivs[-1] if active_ivs else ivs[-1]
         interview = {
             "link": f"{_PORTAL_BASE}/interview/{iv.uuid}",
             "status": iv.status,
             "scheduled_at": iv.scheduled_at.isoformat() if iv.scheduled_at else None,
             "duration_minutes": iv.duration_minutes,
+        }
+
+    human_interview = None
+    human_rows = sorted(cand.interviews,
+                        key=lambda item: item.created_at or datetime.min)
+    if human_rows:
+        active_rows = [item for item in human_rows
+                       if item.status != "cancelled"]
+        row = active_rows[-1] if active_rows else human_rows[-1]
+        human_interview = {
+            "status": row.status,
+            "type": row.interview_type,
+            "scheduled_at": (row.scheduled_at.isoformat()
+                             if row.scheduled_at else None),
+            "duration_minutes": row.duration_minutes,
+            "location": row.location or "",
         }
 
     withdrawn = cand.status == "withdrawn"
@@ -463,6 +501,7 @@ def _application_view(cand: Candidate) -> dict:
         "resume_score": cand.resume_score,
         "test": test,
         "interview": interview,
+        "human_interview": human_interview,
         "withdrawn": withdrawn,
         # Resume can be swapped only before a test is assigned; withdraw is
         # available until the candidate leaves the pipeline.

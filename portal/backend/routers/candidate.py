@@ -16,12 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from core import mailer, security
+from core import mailer, otps, security
 from core.auto_invite import maybe_auto_invite
 from core.models import (
     Candidate,
     CandidateAnswer,
-    Otp,
     ProctorEvent,
     Question,
     Test,
@@ -97,6 +96,41 @@ def _get_assignment(db, token: str) -> TestAssignment:
     return a
 
 
+def _score_and_close(a: TestAssignment, db, chosen: dict[int, int],
+                     status: str, completed_at: datetime,
+                     reason: str | None = None) -> tuple[int, int]:
+    """Persist one complete answer sheet and close an active assignment."""
+    paper = questions_for(a)
+    correct = 0
+    for q in paper:
+        selected = int(chosen.get(q.id, -1))
+        is_correct = selected == q.correct_index
+        correct += int(is_correct)
+        db.add(CandidateAnswer(
+            assignment_uuid=a.uuid, question_id=q.id,
+            selected_index=selected, is_correct=is_correct))
+    a.status = status
+    a.submitted_at = completed_at
+    a.test_score = round(100 * correct / max(1, len(paper)), 1)
+    a.candidate.status = ("test_terminated" if status == "terminated"
+                          else "tested")
+    a.terminated_reason = reason if status == "terminated" else None
+    return len(chosen), len(paper)
+
+
+def _email_termination(a: TestAssignment, reason: str) -> None:
+    try:
+        mailer.send_email(
+            a.candidate.email, f"Assessment ended — {a.test.job.title}",
+            f"Hi {a.candidate.name or 'there'},\n\nYour assessment for the "
+            f"{a.test.job.title} role was ended automatically because the "
+            f"proctoring system recorded repeated violations ({reason}).\n\n"
+            "The answers you provided up to that point were recorded. The "
+            "recruiting team will review the session and be in touch.\n")
+    except Exception:  # noqa: BLE001 - finalization must not depend on email
+        pass
+
+
 def finalize_if_expired(a: TestAssignment, db) -> bool:
     """Auto-submit a started assignment whose deadline (plus grace) passed.
 
@@ -117,19 +151,8 @@ def finalize_if_expired(a: TestAssignment, db) -> bool:
         return False
 
     draft = a.draft_answers or {}
-    paper = questions_for(a)
-    correct = 0
-    for q in paper:
-        sel = int(draft.get(str(q.id), -1))
-        is_right = sel == q.correct_index
-        correct += int(is_right)
-        db.add(CandidateAnswer(
-            assignment_uuid=a.uuid, question_id=q.id,
-            selected_index=sel, is_correct=is_right))
-    a.status = "submitted"
-    a.submitted_at = deadline
-    a.test_score = round(100 * correct / max(1, len(paper)), 1)
-    a.candidate.status = "tested"
+    chosen = {int(key): int(value) for key, value in draft.items()}
+    _score_and_close(a, db, chosen, "submitted", deadline)
     db.add(ProctorEvent(
         assignment_uuid=a.uuid, event_type="auto_submitted", is_warning=False,
         detail="Auto-submitted at deadline from saved draft "
@@ -203,18 +226,13 @@ def request_otp(token: str, body: EmailIn, db=Depends(get_db)):
         raise HTTPException(403, "This email does not match the invitation.")
 
     # Rate limit: protects the candidate's inbox and the email quota.
-    window_start = datetime.utcnow() - timedelta(minutes=OTP_RATE_WINDOW_MIN)
-    recent = db.execute(
-        select(Otp).where(Otp.email == email,
-                          Otp.created_at > window_start)).scalars().all()
-    if len(recent) >= OTP_RATE_LIMIT:
+    if otps.recent_count(db, email, otps.ASSESSMENT, a.uuid,
+                         OTP_RATE_WINDOW_MIN) >= OTP_RATE_LIMIT:
         raise HTTPException(
             429, f"Too many codes requested — wait a few minutes and use "
                  f"the most recent code sent to {email}.")
 
-    code = security.generate_otp()
-    db.add(Otp(email=email, code_hash=security.hash_otp(code, email),
-               expires_at=security.otp_expiry()))
+    code = otps.issue(db, email, otps.ASSESSMENT, a.uuid)
     ok, msg = mailer.send_email(
         email,
         "Your assessment verification code",
@@ -235,20 +253,14 @@ def verify_otp(token: str, body: VerifyIn, db=Depends(get_db)):
     if email != (a.candidate.email or "").strip().lower():
         raise HTTPException(403, "This email does not match the invitation.")
 
-    # NOTE: use == False, not .is_(False) — SQLAlchemy renders is_() as
-    # "used IS 0" which is invalid T-SQL on SQL Server BIT columns.
-    otp = db.execute(
-        select(Otp).where(Otp.email == email, Otp.used == False)  # noqa: E712
-        .order_by(Otp.id.desc())).scalars().first()
-    if not otp or datetime.utcnow() > otp.expires_at:
+    ok, reason = otps.verify(
+        db, email, body.code, otps.ASSESSMENT, a.uuid)
+    if reason == "expired":
         raise HTTPException(401, "Code expired — request a new one.")
-    if otp.attempts >= security.OTP_MAX_ATTEMPTS:
+    if reason == "attempts":
         raise HTTPException(429, "Too many attempts — request a new code.")
-
-    otp.attempts += 1
-    if security.hash_otp(body.code.strip(), email) != otp.code_hash:
+    if not ok:
         raise HTTPException(401, "Incorrect code.")
-    otp.used = True
     return {"token": security.candidate_token(a.uuid)}
 
 
@@ -319,10 +331,9 @@ def proctor_event(token: str, body: ProctorEventIn, db=Depends(get_db),
                   auth_assignment: str = Depends(candidate_assignment_id)):
     """Log a proctoring observation from the candidate's browser.
 
-    Warning-type events increment the assignment's warning count; once it
-    reaches PROCTOR_MAX_WARNINGS the response tells the client to terminate
-    (the client then submits with terminated_reason, and the server refuses
-    further test access regardless).
+    Warning-type events increment the assignment's warning count. The server
+    immediately scores the saved draft and closes a proctored assignment when
+    its configured limit is reached; the browser response is only a UI signal.
     """
     if auth_assignment != token:
         raise HTTPException(403, "Token does not match this assessment.")
@@ -345,11 +356,17 @@ def proctor_event(token: str, body: ProctorEventIn, db=Depends(get_db),
     a.last_seen = datetime.utcnow()
 
     limit = _test_max_warnings(a)
+    terminate = bool(a.test.proctored and (a.proctor_warnings or 0) >= limit)
+    if terminate:
+        reason = f"Reached the proctoring limit ({limit} warnings)"
+        draft = {int(key): int(value)
+                 for key, value in (a.draft_answers or {}).items()}
+        _score_and_close(a, db, draft, "terminated", datetime.utcnow(), reason)
+        _email_termination(a, reason)
     return {
         "warnings": a.proctor_warnings or 0,
         "max_warnings": limit,
-        "terminate": bool(a.test.proctored
-                          and (a.proctor_warnings or 0) >= limit),
+        "terminate": terminate,
     }
 
 
@@ -370,27 +387,14 @@ def submit(token: str, body: SubmitIn, db=Depends(get_db),
     if now > deadline:
         raise HTTPException(410, "Time is up — submission window closed.")
 
-    by_id = {q.id: q for q in questions_for(a)}
     chosen = {ans.question_id: ans.selected_index for ans in body.answers}
     if not chosen and a.draft_answers:
         # Crash/termination path: fall back to the autosaved draft.
         chosen = {int(k): int(v) for k, v in a.draft_answers.items()}
-    correct = 0
-    for qid, q in by_id.items():
-        sel = chosen.get(qid, -1)
-        is_right = sel == q.correct_index
-        correct += int(is_right)
-        db.add(CandidateAnswer(
-            assignment_uuid=a.uuid, question_id=qid,
-            selected_index=sel, is_correct=is_right))
-
     terminated = bool(body.terminated_reason)
-    a.status = "terminated" if terminated else "submitted"
-    a.submitted_at = now
-    a.test_score = round(100 * correct / max(1, len(by_id)), 1)
-    a.candidate.status = "test_terminated" if terminated else "tested"
-    if terminated:
-        a.terminated_reason = body.terminated_reason
+    answered, total = _score_and_close(
+        a, db, chosen, "terminated" if terminated else "submitted", now,
+        body.terminated_reason)
 
     # Confirmation email (non-fatal — never block a valid submission on email).
     # Score is intentionally NOT included; the recruiter decides next steps.
@@ -407,24 +411,15 @@ def submit(token: str, body: SubmitIn, db=Depends(get_db),
         taken_str = f"{taken_secs // 3600}h {(taken_secs % 3600) // 60}m"
     try:
         if terminated:
-            mailer.send_email(
-                a.candidate.email,
-                f"Assessment ended — {a.test.job.title}",
-                f"Hi {a.candidate.name or 'there'},\n\n"
-                f"Your assessment for the {a.test.job.title} role was ended "
-                f"automatically because the proctoring system recorded "
-                f"repeated violations ({body.terminated_reason}).\n\n"
-                "The answers you provided up to that point were recorded. "
-                "The recruiting team will review the session and be in "
-                "touch.\n")
+            _email_termination(a, body.terminated_reason or "policy violation")
         else:
             mailer.send_email(
                 a.candidate.email,
                 f"Assessment received — {a.test.job.title}",
                 f"Hi {a.candidate.name or 'there'},\n\n"
                 f"We've received your completed assessment for the "
-                f"{a.test.job.title} role. You answered {len(chosen)} of "
-                f"{len(by_id)} questions in {taken_str}.\n\n"
+                f"{a.test.job.title} role. You answered {answered} of "
+                f"{total} questions in {taken_str}.\n\n"
                 "Thank you for taking the time. The recruiting team will "
                 "review your results and be in touch about next steps.\n")
     except Exception:  # noqa: BLE001 - submission already succeeded
@@ -437,5 +432,5 @@ def submit(token: str, body: SubmitIn, db=Depends(get_db),
         auto = maybe_auto_invite(db, a, _PORTAL_BASE)
 
     return {"submitted": True, "terminated": terminated,
-            "answered": len(chosen), "total_questions": len(by_id),
+            "answered": answered, "total_questions": total,
             "auto_invited": bool(auto.get("invited"))}

@@ -9,11 +9,14 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 
+import logging
+
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 if not JWT_SECRET:
     # Random per-process secret. Fine for dev; set JWT_SECRET in .env for
     # anything real (otherwise every restart logs everyone out).
     JWT_SECRET = secrets.token_hex(32)
+    logging.warning("JWT_SECRET is empty. Using ephemeral secret. Sessions will be lost on restart.")
 
 JWT_ALGO = "HS256"
 ADMIN_TOKEN_HOURS = 12
@@ -83,5 +86,20 @@ def hash_otp(code: str, email: str) -> str:
                     hashlib.sha256).hexdigest()
 
 
+def protect_cnic(digits: str) -> str:
+    """Return a non-reversible, uniqueness-preserving CNIC representation."""
+    digest = hmac.new(JWT_SECRET.encode(), f"cnic:{digits}".encode(),
+                      hashlib.sha256).hexdigest()
+    return f"{digits[-4:]}:{digest}"
+
+
+def masked_cnic(protected: str) -> str:
+    """Expose only the retained final four digits, never the identifier."""
+    if ":" in (protected or ""):
+        return f"*********{protected.split(':', 1)[0]}"
+    digits = "".join(char for char in (protected or "") if char.isdigit())
+    return f"*********{digits[-4:]}" if digits else "*************"
+
+
 def otp_expiry() -> datetime:
-    return datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES)
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=OTP_TTL_MINUTES)

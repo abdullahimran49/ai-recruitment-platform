@@ -658,6 +658,10 @@ export default function Dashboard() {
   // AI interview state
   const [aiInterviews, setAiInterviews] = useState([]);
   const [showAIForm, setShowAIForm] = useState(null); // candidate uuid
+  const [scorecardCandidate, setScorecardCandidate] = useState(null);
+  const [scorecardForm, setScorecardForm] = useState({ overall: 3, recommendation: "neutral", scores: {}, comment: "" });
+  const [scorecardBusy, setScorecardBusy] = useState(false);
+
   const [aiForm, setAiForm] = useState({
     scheduled_at: "", duration_minutes: 20, num_questions: 5,
     focus: "", max_warnings: 3,
@@ -928,6 +932,22 @@ export default function Dashboard() {
       .finally(() => setDetailLoading(false));
   };
 
+  const saveScorecard = async (e) => {
+    e.preventDefault();
+    if (!scorecardCandidate) return;
+    setScorecardBusy(true);
+    try {
+      await apiSend(`/api/admin/candidates/${scorecardCandidate.candidate_uuid}/scorecards`, "POST", scorecardForm, session.token);
+      setScorecardCandidate(null);
+      setScorecardForm({ overall: 3, recommendation: "neutral", scores: {}, comment: "" });
+      alert("Scorecard saved.");
+      refreshJob();
+    } catch (e) {
+      setError(e.message);
+    }
+    setScorecardBusy(false);
+  };
+
   const resetAssignment = async (c) => {
     const reason = prompt(
       `Give ${c.name} a new attempt?\n\n`
@@ -1054,8 +1074,8 @@ export default function Dashboard() {
           <div className="table-scroll">
             <table>
               <thead>
-                <tr><th>Title</th><th>Department</th><th>Candidates</th>
-                  <th>Tests submitted</th><th>Pass ≥</th><th>Actions</th></tr>
+                <tr><th>Job Title</th><th>Department</th><th>Total Applicants</th>
+                  <th>Tests Completed</th><th>Pass ≥</th><th>Key Dates</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {jobs.map((j) => (
@@ -1073,6 +1093,10 @@ export default function Dashboard() {
                     <td>{j.candidates}</td>
                     <td>{j.tests_submitted}</td>
                     <td>{j.pass_threshold}</td>
+                    <td style={{ fontSize: "0.85em", color: "var(--text-muted)", minWidth: 160 }}>
+                      <div>Cr: {localDate(j.created_at).toLocaleString()}</div>
+                      <div>Up: {localDate(j.updated_at).toLocaleString()}</div>
+                    </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div className="actions">
                         <button className="mini secondary"
@@ -1082,12 +1106,24 @@ export default function Dashboard() {
                                   jd_text: "",
                                   department_id: (departments.find(
                                     (d) => d.name === j.department) || {}).id || "",
+                                  is_published: !!j.is_published,
+                                  application_deadline: j.application_deadline || "",
+                                  location: j.location || "",
+                                  employment_type: j.employment_type || "",
+                                  openings: j.openings || 1,
                                   _loaded: false,
                                 })}
                                 title="Edit job">✏️ Edit</button>
-                        <button className="mini danger"
-                                onClick={() => deleteJob(j)}
-                                title="Delete job and all its data">🗑 Delete</button>
+                        <button className={`mini ${j.is_published ? 'danger' : 'secondary'}`}
+                                onClick={async () => {
+                                  try {
+                                    await apiSend(`/api/admin/jobs/${j.uuid}`, "PUT", { is_published: !j.is_published }, session.token);
+                                    apiGet("/api/admin/jobs", session.token).then(setJobs).catch(() => {});
+                                  } catch (e) { setError(e.message); }
+                                }}
+                                title={j.is_published ? "Unpublish job" : "Publish job"}>
+                          {j.is_published ? "👁️ Unpublish" : "🌍 Publish"}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1403,10 +1439,10 @@ export default function Dashboard() {
                 <div className="table-scroll" style={{ marginTop: 14 }}>
                   <table>
                     <thead>
-                      <tr><th>#</th><th>Candidate</th><th>Résumé</th><th>Test</th>
-                        <th>Interview</th><th style={{ minWidth: 130 }}>Screening score</th>
-                        <th style={{ minWidth: 130 }}>Overall score</th>
-                        <th>Recommendation</th><th></th></tr>
+                      <tr><th>Rank</th><th>Candidate Name</th><th>Resume Score</th><th>Test Score</th>
+                        <th>Interview Score</th><th style={{ minWidth: 130 }}>Initial Screening</th>
+                        <th style={{ minWidth: 130 }}>Final Merit Score</th>
+                        <th>Our Recommendation</th><th></th></tr>
                     </thead>
                     <tbody>
                       {merit.candidates.map((r) => {
@@ -1492,9 +1528,9 @@ export default function Dashboard() {
               <div className="table-scroll">
                 <table>
                   <thead>
-                    <tr><th>Candidate</th><th>Résumé</th><th>Test</th>
-                      <th>Time</th><th>Expires</th>
-                      <th>Interview</th><th>Actions</th></tr>
+                    <tr><th>Candidate Name</th><th>Resume Score</th><th>Test Score</th>
+                      <th>Time Taken</th><th>Deadline</th>
+                      <th>Interview Status</th><th>Actions</th></tr>
                   </thead>
                   <tbody>
                     {candidates.map((c) => {
@@ -1707,8 +1743,8 @@ export default function Dashboard() {
               <div className="table-scroll">
                 <table>
                   <thead>
-                    <tr><th>Candidate</th><th>Scheduled</th><th>Status</th>
-                      <th>AI score</th><th>Questions</th><th>⚠</th><th></th></tr>
+                    <tr><th>Candidate Name</th><th>Scheduled For</th><th>Interview Status</th>
+                      <th>AI Score</th><th>Questions Asked</th><th>⚠</th><th></th></tr>
                   </thead>
                   <tbody>
                     {aiInterviews.map((iv) => {
@@ -1817,8 +1853,8 @@ export default function Dashboard() {
               <div className="table-scroll">
                 <table>
                   <thead>
-                    <tr><th>Candidate</th><th>Type</th><th>Date</th>
-                      <th>Duration</th><th>Location</th><th>Status</th><th></th></tr>
+                    <tr><th>Candidate Name</th><th>Interview Type</th><th>Scheduled Date</th>
+                      <th>Duration (Mins)</th><th>Location/Link</th><th>Status</th><th>Actions</th></tr>
                   </thead>
                   <tbody>
                     {interviews.map((iv) => (
@@ -1839,6 +1875,8 @@ export default function Dashboard() {
                             <button className="mini danger"
                                     onClick={() => cancelInterview(iv.id)}>Cancel</button>
                           )}
+                          <button className="mini secondary" style={{ marginLeft: 6 }}
+                                  onClick={() => setScorecardCandidate(iv)}>Scorecard</button>
                         </td>
                       </tr>
                     ))}
@@ -1849,6 +1887,57 @@ export default function Dashboard() {
           )}
           </div>
           )}
+        </div>
+      )}
+
+      {scorecardCandidate && (
+        <div className="modal" onClick={() => setScorecardCandidate(null)}>
+          <div className="card" onClick={(e) => e.stopPropagation()} style={{ minWidth: 400 }}>
+            <h3>Scorecard for {scorecardCandidate.candidate_name}</h3>
+            <p className="muted">Human interview evaluation.</p>
+            <form onSubmit={saveScorecard}>
+              <div className="row" style={{ flexWrap: "wrap" }}>
+                <div><label>Overall</label><select
+                  value={scorecardForm.overall}
+                  onChange={(e) => setScorecardForm({ ...scorecardForm,
+                    overall: Number(e.target.value) })}>
+                  {[1, 2, 3, 4, 5].map((score) =>
+                    <option key={score} value={score}>{score} / 5</option>)}
+                </select></div>
+                <div><label>Recommendation</label><select
+                  value={scorecardForm.recommendation}
+                  onChange={(e) => setScorecardForm({ ...scorecardForm,
+                    recommendation: e.target.value })}>
+                  <option value="strong_yes">Strong yes</option>
+                  <option value="yes">Yes</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="no">No</option>
+                  <option value="strong_no">Strong no</option>
+                </select></div>
+                {["technical", "communication", "role_fit"].map((criterion) => (
+                  <div key={criterion}><label>{criterion.replace("_", " ")}</label>
+                    <select value={scorecardForm.scores[criterion] || 3}
+                      onChange={(e) => {
+                        const newScores = { ...scorecardForm.scores, [criterion]: Number(e.target.value) };
+                        const criteria = ["technical", "communication", "role_fit"];
+                        const sum = criteria.reduce((a, c) => a + (newScores[c] || 3), 0);
+                        const avg = Math.round(sum / criteria.length);
+                        setScorecardForm({ ...scorecardForm, scores: newScores, overall: avg });
+                      }}>
+                      {[1, 2, 3, 4, 5].map((score) =>
+                        <option key={score} value={score}>{score}</option>)}
+                    </select></div>
+                ))}
+              </div>
+              <label>Evidence and comments</label>
+              <textarea rows={3} value={scorecardForm.comment} required
+                        onChange={(e) => setScorecardForm({ ...scorecardForm,
+                          comment: e.target.value })} />
+              <button disabled={scorecardBusy}>
+                {scorecardBusy ? "Saving…" : "Save my scorecard"}
+              </button>
+            </form>
+          </div>
         </div>
       )}
 
@@ -1873,8 +1962,8 @@ export default function Dashboard() {
             <table>
               <thead>
                 <tr>
-                  <th>#</th><th>STATUS</th><th>SCORE</th><th>QUESTIONS</th>
-                  <th>TIME</th><th>WARNINGS</th><th>WHEN</th><th></th>
+                  <th>Attempt</th><th>Status</th><th>Score</th><th>Questions Answered</th>
+                  <th>Time Spent</th><th>Proctor Warnings</th><th>Date Taken</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -2088,7 +2177,7 @@ export default function Dashboard() {
                 aiDetail.status === "completed" ? "ok" : "bad"}`}>
                 {aiDetail.status}</span></div>
             <div><label>Questions</label>
-              <strong>{aiDetail.questions_asked} / {aiDetail.num_questions}
+              <strong>{Math.ceil(aiDetail.questions_asked)} / {aiDetail.num_questions}
               </strong></div>
             <div><label>Warnings</label>
               <strong>{aiDetail.proctor_warnings} / {aiDetail.max_warnings}

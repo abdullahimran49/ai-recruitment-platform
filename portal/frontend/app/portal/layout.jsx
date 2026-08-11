@@ -29,6 +29,7 @@ export default function PortalLayout({ children }) {
     <div className="portal-scope">
       <nav className="portal-nav">
         <Link href="/portal" className="portal-brand">
+          <img src="/images/pia-logo.png" alt="PIA Pakistan International Airlines" />
           <span className="logo">✦</span> Careers
         </Link>
         <div className="links">

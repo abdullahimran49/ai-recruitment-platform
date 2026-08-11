@@ -12,7 +12,7 @@ export default function PostJob() {
   const [form, setForm] = useState({
     title: "", department_id: "", jd_text: "", location: "",
     employment_type: "Full-time", openings: 1, pass_threshold: 60,
-    application_deadline: "", is_published: true,
+    application_deadline: "", is_published: false,
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

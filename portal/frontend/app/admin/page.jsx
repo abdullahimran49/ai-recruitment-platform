@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiSend, saveAdminSession } from "@/lib/api";
 
 export default function AdminLogin() {
@@ -24,7 +25,8 @@ export default function AdminLogin() {
 
   return (
     <main className="container narrow">
-      <div className="card">
+      <div className="card pia-admin-login">
+        <div className="pia-form-brand"><img src="/images/pia-logo.png" alt="PIA Pakistan International Airlines" /><span>Recruitment operations</span></div>
         <h1>Admin login</h1>
         <p className="muted">Recruiting portal administration</p>
         <form onSubmit={login}>
@@ -37,6 +39,9 @@ export default function AdminLogin() {
           <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         </form>
         {error && <p className="error">{error}</p>}
+        <p className="muted" style={{ marginTop: 14 }}>
+          <Link href="/admin/forgot">Forgot your password?</Link>
+        </p>
       </div>
     </main>
   );

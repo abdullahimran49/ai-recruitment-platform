@@ -16,8 +16,8 @@ _log = logging.getLogger(__name__)
 # Small batches with a generous per-call output budget: hard questions carry
 # code snippets and can run 250-350 tokens each, so 6-at-1500-tokens truncated
 # the last ones mid-text. 3 questions at 3500 tokens leaves ample headroom.
-_BATCH_SIZE = 3
-_MCQ_MAX_TOKENS = 3500
+_BATCH_SIZE = 10
+_MCQ_MAX_TOKENS = 8000
 
 _MCQ_SYSTEM = """You are a senior technical interviewer writing a screening \
 quiz. Base every question ONLY on skills, tools, and responsibilities named \
@@ -59,28 +59,20 @@ Respond with ONLY a JSON object of this shape:
 _MCQ_TEMPERATURE = 0.9
 
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 def generate_mcqs(job_description: str, difficulty: str, count: int,
                   avoid: list[str] | None = None,
                   category: str = "") -> MCQTest:
-    """Generate `count` questions at `difficulty` from the JD, in batches.
-
-    `avoid` is question text the model must not repeat or paraphrase. It is
-    what makes "keep these, regenerate the rest" work: pass the kept questions
-    in and the replacements come back genuinely different rather than reworded.
-
-    `category` narrows generation to one topic ("Data", "AI", ...) so a bank
-    can be filled bucket by bucket; the returned questions are tagged with it.
-    """
+    """Generate `count` questions at `difficulty` from the JD, in batches concurrently."""
     questions: list[MCQQuestion] = []
     attempts = 0
-    max_attempts = (count // _BATCH_SIZE + 2) * 2  # generous retry budget
+    max_attempts = (count // _BATCH_SIZE + 2) * 2
     avoid = list(avoid or [])
-
-    while len(questions) < count and attempts < max_attempts:
-        attempts += 1
-        need = min(_BATCH_SIZE, count - len(questions))
-        # Everything generated so far, plus anything the caller is keeping.
-        asked = avoid + [q.question for q in questions]
+    
+    seen = {a.strip().lower() for a in avoid}
+    
+    def _fetch_batch(need: int, asked: list[str]) -> list[MCQQuestion]:
         topic = (f"TOPIC (every question must be about this): {category}\n"
                  if category.strip() else "")
         user = (
@@ -92,16 +84,42 @@ def generate_mcqs(job_description: str, difficulty: str, count: int,
             "and use different phrasings):\n"
             + ("\n".join(f"- {q}" for q in asked) or "(none)")
         )
-        data = llm.chat_json(_MCQ_SYSTEM, user, temperature=_MCQ_TEMPERATURE,
-                             max_tokens=_MCQ_MAX_TOKENS)
-        seen = {x.question.strip().lower() for x in questions}
-        seen |= {a.strip().lower() for a in avoid}
+        data = llm.chat_json(_MCQ_SYSTEM, user, temperature=_MCQ_TEMPERATURE, max_tokens=_MCQ_MAX_TOKENS)
+        batch_qs = []
         for row in (data.get("questions", []) if isinstance(data, dict) else []):
             q = _validate(row)
-            if q and q.question.strip().lower() not in seen:
+            if q:
                 q.category = category.strip()
-                seen.add(q.question.strip().lower())
-                questions.append(q)
+                batch_qs.append(q)
+        return batch_qs
+
+    while len(questions) < count and attempts < max_attempts:
+        needed = count - len(questions)
+        batch_count = (needed + _BATCH_SIZE - 1) // _BATCH_SIZE
+        
+        # Launch concurrently
+        futures = []
+        with ThreadPoolExecutor(max_workers=batch_count) as executor:
+            for _ in range(batch_count):
+                attempts += 1
+                if attempts > max_attempts:
+                    break
+                # Each thread gets the currently 'asked' list so they avoid the same baseline
+                asked = avoid + [q.question for q in questions]
+                futures.append(executor.submit(_fetch_batch, min(_BATCH_SIZE, needed), asked))
+                
+            for future in as_completed(futures):
+                try:
+                    batch_qs = future.result()
+                    for q in batch_qs:
+                        q_text = q.question.strip().lower()
+                        if q_text not in seen:
+                            seen.add(q_text)
+                            questions.append(q)
+                            if len(questions) >= count:
+                                break
+                except Exception as e:
+                    _log.warning("MCQ batch generation failed: %s", e)
                 if len(questions) >= count:
                     break
 

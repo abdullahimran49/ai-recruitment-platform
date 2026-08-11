@@ -4,9 +4,9 @@
 Run with:  streamlit run app.py
 
 Tabs:
-  2. Dashboard      — ranked results, per-candidate charts + explanations
-  3. Communication  — Top-N selection, LLM-drafted emails, manual edit, send
-  4. Assessment     — JD-based MCQ generation, review/approve, dispatch
+  1. Screen Resumes — upload PDFs, configure criteria, score candidates
+  2. Review Results — ranked results, per-candidate charts + explanations
+  3. Send Tests     — JD-based MCQ generation, review/approve, dispatch
 """
 
 import difflib
@@ -24,6 +24,9 @@ import mcq as mcq_mod
 import pdf
 import storage
 from core import predictability
+from core.db import db_enabled as _core_db_enabled, session as _core_session
+from core.models import User as _AdminUser
+from core.security import verify_password as _verify_pw
 from schemas import Criteria, Criterion, MCQQuestion, MCQTest, PenaltyRule
 from scoring import process_resume
 
@@ -35,7 +38,7 @@ try:
 except Exception:  # noqa: BLE001
     _DB_ON = False
 
-st.set_page_config(page_title="Recruiter Console — ATS", page_icon="🧭",
+st.set_page_config(page_title="Recruiter Console — ATS", page_icon="Pakistan-International-Airlines-Logo.png",
                    layout="wide")
 
 # ---- Look & feel (HR-friendly polish) ----------------------------------------
@@ -43,54 +46,206 @@ st.set_page_config(page_title="Recruiter Console — ATS", page_icon="🧭",
 # non-technical users: softer cards, rounded controls, clearer headings.
 st.markdown("""
 <style>
-  :root { --acc:#7c74ff; --acc2:#8f88ff; --ink:#eceef3; --mut:#98a1b2;
-          --line:#262b35; --soft:#171a21; --card:#1d212a; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  :root { --acc:#005c4a; --acc2:#00493b; --acc-soft:#e4f1eb; --gold:#c9a35c;
+          --ink:#123d34; --mut:#617a73; --line:#d8e5de; --line2:#bdd3c8;
+          --soft:#e8f1ec; --card:#ffffff; --bg:#f4f8f5; --head:#073d32;
+          --ok:#087e5e; --ok-soft:#e4f5ed; --danger:#bb3f38; --danger-soft:#fbedeb;
+          --warn:#a96f12; }
+  html, body, .stApp, [data-testid="stAppViewContainer"] {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif !important;
+  }
   .block-container { padding-top: 1.4rem; max-width: 1500px; }
-  h1, h2, h3 { letter-spacing: -0.02em; }
+  h1, h2, h3 { letter-spacing: -0.02em; color: var(--head); }
   /* App header banner */
   .app-hero {
-    background: linear-gradient(135deg, #5b54e6, #7c74ff);
-    color: #fff; border-radius: 16px; padding: 20px 26px; margin-bottom: 8px;
-    box-shadow: 0 16px 40px -20px rgba(124,116,255,.55);
+    background: linear-gradient(135deg, #005c4a 0%, #2d9474 100%);
+    color: #fff; border-radius: 14px; padding: 22px 28px; margin-bottom: 10px;
+    box-shadow: 0 16px 40px -20px rgba(0,92,74,.45);
+    border-bottom: 3px solid var(--gold);
   }
-  .app-hero h1 { color:#fff; margin:0; font-size: 26px; }
-  .app-hero p { color: rgba(255,255,255,.92); margin: 4px 0 0; font-size: 14px; }
+  .app-hero h1 { color:#fff !important; margin:0; font-size: 26px; }
+  .app-hero p { color: rgba(255,255,255,.9); margin: 4px 0 0; font-size: 14px; }
+  .app-hero .gold-accent { color: var(--gold); }
   /* Tabs: pill style */
   .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--line); }
   .stTabs [data-baseweb="tab"] {
     height: auto; padding: 10px 18px; border-radius: 10px 10px 0 0;
     font-weight: 600; color: var(--mut);
   }
-  .stTabs [aria-selected="true"] { color: var(--acc); background: var(--soft); }
+  .stTabs [aria-selected="true"] { color: var(--acc); background: var(--acc-soft); }
   /* Buttons */
   .stButton > button, .stDownloadButton > button {
-    border-radius: 10px; font-weight: 600; border: 1px solid var(--line);
-    transition: transform .08s, box-shadow .15s;
+    border-radius: 8px; font-weight: 600; border: 1px solid var(--line2);
+    transition: transform .08s, box-shadow .15s, background .15s;
+    color: var(--ink);
   }
-  .stButton > button[kind="primary"] {
+  .stButton > button[kind="primary"], .stButton > button[data-testid="stBaseButton-primary"] {
     background: var(--acc); border-color: var(--acc); color: #fff;
-    box-shadow: 0 8px 20px -10px rgba(124,116,255,.7);
+    box-shadow: 0 7px 16px -10px rgba(0,70,55,.7);
+  }
+  .stButton > button[kind="primary"]:hover, .stButton > button[data-testid="stBaseButton-primary"]:hover {
+    background: var(--acc2); transform: translateY(-1px);
+    box-shadow: 0 12px 30px -18px rgba(0,68,53,.5);
   }
   .stButton > button:hover { transform: translateY(-1px); border-color: var(--acc); }
   /* Inputs */
   .stTextInput input, .stNumberInput input, .stTextArea textarea,
-  .stSelectbox div[data-baseweb="select"] > div { border-radius: 10px; }
+  .stSelectbox div[data-baseweb="select"] > div {
+    border-radius: 8px; border-color: var(--line) !important;
+  }
+  .stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {
+    border-color: var(--acc) !important;
+    box-shadow: 0 0 0 3px rgba(0,92,74,.14) !important;
+  }
   /* Metric cards */
   [data-testid="stMetric"] {
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    padding: 14px 16px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 1px 2px rgba(9,58,46,.05), 0 4px 12px rgba(9,58,46,.05);
   }
+  [data-testid="stMetric"] [data-testid="stMetricLabel"] { color: var(--mut); }
+  [data-testid="stMetric"] [data-testid="stMetricValue"] { color: var(--head); }
   /* Expanders softer */
   [data-testid="stExpander"] { border-radius: 12px; border-color: var(--line); }
   [data-testid="stExpander"] summary { border-radius: 12px; }
+  /* Sidebar styling */
+  [data-testid="stSidebar"] {
+    background: #fff !important;
+    border-right: 1px solid var(--line) !important;
+  }
+  [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
+  [data-testid="stSidebar"] h3 { color: var(--head); }
+  /* Dataframe/table header */
+  [data-testid="stDataFrame"] th {
+    background: #edf5f0 !important; color: #4d6d63 !important;
+  }
+  /* Success/error/info/warning alerts */
+  .stAlert [data-testid="stNotificationContentSuccess"] { border-left-color: var(--ok); }
+  .stAlert [data-testid="stNotificationContentError"] { border-left-color: var(--danger); }
+  .stAlert [data-testid="stNotificationContentWarning"] { border-left-color: var(--warn); }
+  /* Progress bar */
+  .stProgress > div > div > div { background: linear-gradient(90deg, #005c4a, #2d9474) !important; }
+  /* Divider */
+  [data-testid="stHorizontalBlock"] hr, hr { border-color: var(--line) !important; }
+  /* File uploader */
+  [data-testid="stFileUploader"] > div { border-color: var(--line); border-radius: 12px; }
+  [data-testid="stFileUploader"] > div:hover { border-color: var(--acc); }
+  /* Selectbox dropdown */
+  [data-baseweb="popover"] { border-radius: 10px !important; }
+  /* Form submit buttons */
+  .stFormSubmitButton > button {
+    background: var(--acc) !important; color: #fff !important;
+    border-color: var(--acc) !important; border-radius: 8px;
+  }
+  .stFormSubmitButton > button:hover { background: var(--acc2) !important; }
+  /* Radio & checkbox accent */
+  .stRadio label, .stCheckbox label { color: var(--ink); }
+  /* Container borders */
+  [data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-color: var(--line) !important; border-radius: 12px;
+  }
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 7px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--acc); }
+  /* Login page */
+  [data-testid="stForm"] {
+    background: var(--card); border-radius: 16px;
+    border: 1px solid var(--line);
+    box-shadow: 0 8px 32px rgba(9,58,46,.10), 0 2px 8px rgba(9,58,46,.06);
+    padding: 24px;
+  }
+  .login-header {
+    text-align: center; margin-bottom: 8px;
+  }
+  .login-header img { margin-bottom: 12px; }
+  .login-title {
+    background: linear-gradient(135deg, #005c4a 0%, #2d9474 100%);
+    color: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;
+    text-align: center;
+    box-shadow: 0 8px 20px -10px rgba(0,92,74,.4);
+    border-bottom: 2px solid var(--gold);
+  }
+  .login-title h2 { color: #fff !important; margin: 0; font-size: 22px; }
+  .login-title p { color: rgba(255,255,255,.85); margin: 4px 0 0; font-size: 13px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
+
+# ---- Authentication gate -------------------------------------------------------
+# Both admin and super_admin users from the existing `users` table can log in.
+# The gate uses st.stop() to prevent any app content from rendering until the
+# user has authenticated.
+
+def _authenticate(email: str, password: str):
+    """Validate credentials against the users table. Returns User dict or None."""
+    from sqlalchemy import select as _sel
+    try:
+        with _core_session() as s:
+            user = s.execute(
+                _sel(_AdminUser).where(_AdminUser.email == email.strip().lower())
+            ).scalars().first()
+            if user and _verify_pw(password, user.password_hash):
+                return {
+                    "uuid": user.uuid, "name": user.name,
+                    "email": user.email, "role": user.role,
+                    "department_id": user.department_id,
+                }
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+if "authenticated_user" not in st.session_state:
+    st.session_state.authenticated_user = None
+
+if st.session_state.authenticated_user is None:
+    _col1, _col2, _col3 = st.columns([1, 1.2, 1])
+    with _col2:
+        with st.form("login_form", border=True):
+            st.markdown("""
+            <div class="login-title" style="margin-top: -10px;">
+              <h2>✈️ PIA Recruiter Console</h2>
+              <p>Sign in to access the recruitment management system</p>
+            </div>
+            """, unsafe_allow_html=True)
+            login_email = st.text_input("Email", placeholder="admin@ats.local")
+            login_password = st.text_input("Password", type="password",
+                                           placeholder="Enter your password")
+            login_clicked = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+
+    if login_clicked:
+        if not login_email or not login_password:
+            st.error("Please enter both email and password.")
+        elif not _core_db_enabled():
+            st.error("Database is not configured. Cannot authenticate. "
+                     "Set DB_PROVIDER in .env and run `python -m core.init_db`.")
+        else:
+            user_info = _authenticate(login_email, login_password)
+            if user_info:
+                st.session_state.authenticated_user = user_info
+                st.rerun()
+            else:
+                st.error("Invalid email or password.")
+
+    st.stop()  # ← prevents ANY content below from rendering
+
+
+# ---- User is authenticated — show the app ------------------------------------
+_current_user = st.session_state.authenticated_user
+_department_scope = (None if _current_user["role"] == "super_admin"
+                     else _current_user["department_id"])
+
+st.markdown(f"""
 <div class="app-hero">
-  <h1>🧭 Recruiter Console</h1>
+  <h1>✈️ PIA Recruiter Console</h1>
   <p>Screen resumes, build assessments, and manage candidates — no technical
   setup required. Work left to right through the tabs below.</p>
+  <p style="margin-top:6px;font-size:12px;opacity:.7">
+    Signed in as <strong class="gold-accent">{_current_user['name'] or _current_user['email']}</strong>
+    &nbsp;·&nbsp; {_current_user['role'].replace('_', ' ').title()}
+  </p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -241,7 +396,20 @@ if "penalty_df" not in st.session_state:
 # ---- Sidebar -------------------------------------------------------------------
 
 with st.sidebar:
-    st.header("⚙️ AI Engine")
+    st.image("Pakistan-International-Airlines-Logo.png", width=180)
+    # ---- Logged-in user info + logout ----
+    st.markdown(f"**👤 {_current_user['name'] or _current_user['email']}**")
+    st.caption(f"Role: {_current_user['role'].replace('_', ' ').title()}")
+    st.link_button("🌐 Main Admin Portal", "http://localhost:3000/admin", use_container_width=True)
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.authenticated_user = None
+        # Clear session keys so the next login starts fresh.
+        for k in list(st.session_state.keys()):
+            if k != "authenticated_user":
+                del st.session_state[k]
+        st.rerun()
+    st.divider()
+    st.header("⚙️ AI Configuration")
     st.write(f"**{config.PROVIDER}** · `{config.MODEL}`")
     if config.PROVIDER == "groq" and not config.API_KEY:
         st.warning("No GROQ_API_KEY set. Add it to `.env` or switch "
@@ -262,7 +430,8 @@ with st.sidebar:
     # the local jobs.json store.
     _jobs_from_db = _DB_ON
     try:
-        jobs = db_bridge.list_saved_jobs() if _DB_ON else storage.load_jobs()
+        jobs = (db_bridge.list_saved_jobs(_department_scope)
+                if _DB_ON else storage.load_jobs())
     except Exception as e:  # noqa: BLE001
         jobs = storage.load_jobs()
         _jobs_from_db = False
@@ -321,7 +490,7 @@ with st.sidebar:
             st.rerun()
         if c_del.button("Delete", width="stretch", disabled=not picked):
             if _jobs_from_db:
-                db_bridge.delete_job_by_title(picked)
+                db_bridge.delete_job_by_title(picked, _department_scope)
             else:
                 storage.delete_job(picked)
             st.rerun()
@@ -350,8 +519,8 @@ if _note:
                            "the job."))
         st.success(msg)
 
-tab_screen, tab_dash, tab_comm, tab_mcq = st.tabs(
-    ["1️⃣ Screen Resumes", "2️⃣ Review Results", "3️⃣ Email Candidates", "4️⃣ Send Tests"])
+tab_screen, tab_dash, tab_mcq = st.tabs(
+    ["1️⃣ Screen Resumes", "2️⃣ Review Results", "3️⃣ Send Tests"])
 
 
 # ================================================================================
@@ -359,7 +528,7 @@ tab_screen, tab_dash, tab_comm, tab_mcq = st.tabs(
 # ================================================================================
 
 with tab_screen:
-    st.subheader("1. Define the Job Description")
+    st.subheader("1. Enter Job Details")
     st.text_area(
         "This is the primary input — the AI uses this to evaluate all candidates.",
         key="jd", height=220,
@@ -413,14 +582,14 @@ with tab_screen:
                    "Weight 1â€“10. Missing must-haves cap the score. "
                    "To delete a row: tick its checkbox and press Delete.")
         v = st.session_state.editor_version
-        st.markdown("**Must-have**")
+        st.markdown("**Required Qualifications**")
         must_df = st.data_editor(
             st.session_state.must_df, num_rows="dynamic", key=f"must_editor_{v}",
             width="stretch", hide_index=True,
             column_config={"weight": st.column_config.NumberColumn(
                 min_value=1, max_value=10, step=1)},
         )
-        st.markdown("**Nice-to-have**")
+        st.markdown("**Preferred Qualifications**")
         nice_df = st.data_editor(
             st.session_state.nice_df, num_rows="dynamic", key=f"nice_editor_{v}",
             width="stretch", hide_index=True,
@@ -462,7 +631,7 @@ with tab_screen:
             "Max total penalty (cap)", 5.0, 100.0, key="penalty_max", step=5.0,
             help="Total penalty from all rules is capped at this value.")
 
-    st.subheader("2. Upload Resumes")
+    st.subheader("2. Upload Applicant Resumes")
     resume_files = st.file_uploader(
         "Upload one or more resume PDFs", type=["pdf"], accept_multiple_files=True)
 
@@ -476,7 +645,7 @@ with tab_screen:
                        "Applicants already sent a test are not included.")
             st.dataframe(
                 pd.DataFrame([{"Candidate": f["name"] or "(from résumé)",
-                               "Email": f["email"], "File": f["filename"]}
+                               "Candidate Email": f["email"], "Uploaded File": f["filename"]}
                              for f in _portal_resumes]),
                 hide_index=True, width="stretch")
             if st.button("Clear loaded portal résumés"):
@@ -567,7 +736,7 @@ with tab_screen:
         st.caption("Required before dispatching portal test links. Re-saving "
                    "updates existing candidates (matched by email).")
         try:
-            departments = db_bridge.list_departments()
+            departments = db_bridge.list_departments(_department_scope)
         except Exception as e:  # noqa: BLE001
             departments = []
             st.error(f"Could not load departments from MySQL: {e}")
@@ -644,17 +813,17 @@ with tab_dash:
             "Email": r.email or "—",
             "Gap penalty": f"-{r.gap_penalty:g}" if r.gap_penalty else "",
             "Rule penalty": f"-{r.criteria_penalty:g}" if r.criteria_penalty else "",
-            "Must-have gaps": len(r.must_have_gaps),
-            "File": r.filename,
+            "Required Qualifications Missing": len(r.must_have_gaps),
+            "Uploaded File": r.filename,
         } for i, r in enumerate(ok)])
         st.dataframe(
             table, hide_index=True, width="stretch",
             column_config={"Score": st.column_config.ProgressColumn(
-                "Score", min_value=0, max_value=100, format="%d")},
+                "Resume Score", min_value=0, max_value=100, format="%d")},
         )
 
         st.divider()
-        st.subheader("Deep Dive: Candidate Analysis")
+        st.subheader("Candidate Analysis & Insights")
         pick = st.selectbox(
             "Candidate", [r.filename for r in ok],
             format_func=lambda fn: next(
@@ -689,13 +858,13 @@ with tab_dash:
             ch1, ch2 = st.columns(2)
             radar = charts.radar_chart(r)
             with ch1:
-                st.markdown("**Skill match radar**")
+                st.markdown("**Skills Profile (Radar Chart)**")
                 if radar:
                     st.plotly_chart(radar, width="stretch")
                 else:
                     st.caption("Needs 3+ scored criteria for a radar.")
             with ch2:
-                st.markdown("**Score breakdown (earned vs available)**")
+                st.markdown("**Detailed Score Breakdown**")
                 st.plotly_chart(
                     charts.breakdown_chart(
                         r, st.session_state.get("criteria_weights", {})),
@@ -703,17 +872,17 @@ with tab_dash:
 
             tl = charts.timeline_chart(r)
             if tl:
-                st.markdown("**Experience timeline**")
+                st.markdown("**Work Experience Timeline**")
                 st.plotly_chart(tl, width="stretch")
 
             if s:
                 st.write(f"**Skills:** {', '.join(s.skills[:20]) or '—'}")
 
-            st.markdown("**Why this score**")
+            st.markdown("**Scoring Rationale & Evidence**")
             _KIND_LABEL = {"overall": "overall", "must_have": "must",
                            "nice_to_have": "nice"}
             expl = pd.DataFrame([{
-                "Criterion": cs.criterion_text,
+                "Requirement": cs.criterion_text,
                 "Type": _KIND_LABEL.get(cs.kind, cs.kind),
                 "Met": round(cs.met, 2),
                 "Evidence": cs.evidence,
@@ -729,128 +898,23 @@ with tab_dash:
             )
 
             if r.penalty_results:
-                st.markdown("**Penalty breakdown**")
+                st.markdown("**Deductions & Flags**")
                 pen_df = pd.DataFrame([{
-                    "Category": p.category.title(),
+                    "Penalty Category": p.category.title(),
                     "Condition": p.condition,
                     "Applied": "✅ Yes" if p.applied else "❌ No",
                     "Deduction": f"-{p.points_deducted:g}" if p.applied else "—",
-                    "Reason": p.reason,
+                    "Explanation": p.reason,
                 } for p in r.penalty_results])
                 st.dataframe(pen_df, hide_index=True, width="stretch")
 
     if failed:
-        st.markdown("**Could not process**")
+        st.markdown("**Failed to Process (Errors)**")
         for r in failed:
             st.warning(f"{r.filename}: {r.error}")
 
 
-# ================================================================================
-# TAB 3 — COMMUNICATION
-# ================================================================================
 
-with tab_comm:
-    ok = ok_results()
-    if not ok:
-        st.info("No results yet — run a screening first.")
-    else:
-        st.subheader("1. Choose who to email")
-        mode = st.radio(
-            "Selection mode", ["Top N", "Pick manually"], horizontal=True,
-            key="comm_mode",
-            help="Top N for batch emails (e.g. invite the top 5); pick "
-                 "manually to email specific people (e.g. one rejection).")
-        c1, c2 = st.columns([1, 2])
-        if mode == "Top N":
-            top_n = c1.number_input("Top N candidates", 1, len(ok),
-                                    min(3, len(ok)), key="top_n")
-            selected = top_n_results(int(top_n))
-        else:
-            threshold = st.session_state.pass_threshold
-            label_by_file = {
-                r.filename: (f"{r.candidate_name} — {r.score:g} "
-                             f"({'PASS' if r.score >= threshold else 'FAIL'})")
-                for r in ok}
-            picked_files = c1.multiselect(
-                "Candidates", list(label_by_file),
-                format_func=lambda fn: label_by_file[fn],
-                key="comm_manual_pick",
-                placeholder="Choose one or more…")
-            selected = [r for r in ok if r.filename in picked_files]
-        missing_email = [r.candidate_name for r in selected if not r.email]
-
-        if selected:
-            c2.dataframe(pd.DataFrame([{
-                "Candidate": r.candidate_name, "Score": r.score,
-                "Email": r.email or "⚠️ none found",
-            } for r in selected]), hide_index=True, width="stretch")
-        else:
-            c2.info("No candidates selected.")
-        if missing_email:
-            st.warning("No email parsed for: " + ", ".join(missing_email)
-                       + ". Sending will be skipped for them.")
-
-        st.subheader("2. Draft and Send")
-        d1, d2, d3, d4 = st.columns(4)
-        kind = d1.selectbox("Email type", list(emailer.EMAIL_KINDS),
-                            format_func=lambda k: k.replace("_", " ").title())
-        job_title = d2.text_input("Job title",
-                                  st.session_state.get("job_name", "") or "the role")
-        company = d3.text_input("Company", "our company")
-        sign_off = d4.text_input("Sign off as", "The Recruiting Team")
-
-        if st.button("🤖 Auto-draft for selected", type="secondary",
-                     disabled=not selected):
-            with st.spinner("Drafting…"):
-                for r in selected:
-                    strengths = ""
-                    if r.criterion_scores:
-                        best = max(r.criterion_scores, key=lambda s: s.met)
-                        strengths = best.evidence[:300]
-                    draft = emailer.draft_email(
-                        kind, r.candidate_name, job_title, company,
-                        strengths=strengths, sign_off=sign_off)
-                    # Write straight into the widget keys (widgets render
-                    # below this handler): a widget's default value is
-                    # ignored once the key exists, so setting the key is the
-                    # only way an auto-draft shows up in the fields.
-                    st.session_state[f"to_{r.filename}"] = r.email
-                    st.session_state[f"subj_{r.filename}"] = draft["subject"]
-                    st.session_state[f"body_{r.filename}"] = draft["body"]
-            st.success(f"Drafted {len(selected)} email(s). Review below.")
-
-        for r in selected:
-            st.session_state.setdefault(f"to_{r.filename}", r.email)
-            st.session_state.setdefault(f"subj_{r.filename}", "")
-            st.session_state.setdefault(f"body_{r.filename}", "")
-            drafted = bool(st.session_state[f"body_{r.filename}"])
-            with st.expander(f"✉️ {r.candidate_name} "
-                             f"({r.email or 'no email'})", expanded=drafted):
-                to = st.text_input("To", key=f"to_{r.filename}")
-                subject = st.text_input("Subject", key=f"subj_{r.filename}")
-                body = st.text_area(
-                    "Body", height=220, key=f"body_{r.filename}",
-                    placeholder="Auto-draft above, or write from scratch…")
-                st.session_state.drafts[r.filename] = {
-                    "to": to, "subject": subject, "body": body}
-                if st.button("Send", key=f"send_{r.filename}",
-                             disabled=not (to and subject and body)):
-                    ok_send, msg = emailer.send_email(to, subject, body)
-                    (st.success if ok_send else st.error)(msg)
-
-        ready = [r for r in selected
-                 if (dr := st.session_state.drafts.get(r.filename))
-                 and dr["to"] and dr["subject"] and dr["body"]]
-        if ready and st.button(f"📤 Send all ({len(ready)})", type="primary"):
-            for r in ready:
-                dr = st.session_state.drafts[r.filename]
-                ok_send, msg = emailer.send_email(
-                    dr["to"], dr["subject"], dr["body"])
-                (st.success if ok_send else st.error)(msg)
-
-        if not emailer.smtp_configured():
-            st.info("SMTP not configured — you can draft and edit, but not "
-                    "send. Add SMTP_HOST/SMTP_USER/SMTP_PASSWORD to `.env`.")
 
 
 # ================================================================================
@@ -1250,7 +1314,7 @@ with tab_mcq:
         test = st.session_state.mcq_test
         if test and test.questions:
             st.divider()
-            st.subheader(f"Review & edit ({len(test.questions)} questions, "
+            st.subheader(f"Review Assessment ({len(test.questions)} questions, "
                          f"{test.difficulty})")
             st.caption(
                 "Edit anything below, then approve. **Keep** marks a question "
@@ -1353,7 +1417,7 @@ with tab_mcq:
 
             if test.approved:
                 st.divider()
-                st.subheader("Dispatch to shortlisted candidates")
+                st.subheader("Send Assessment to Candidates")
                 ok = ok_results()
                 if not ok:
                     st.info("Run a screening first to get candidates.")

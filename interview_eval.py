@@ -16,6 +16,9 @@ import llm
 _EVALUATOR_SYSTEM = (
     "You are a fair, experienced technical hiring evaluator scoring a SPOKEN "
     "screening interview from its transcript.\n\n"
+    "The interview may use one or several languages. Understand and score all "
+    "supported transcript languages equivalently; never reward or penalize the "
+    "candidate for language choice or language switching.\n\n"
     "CRITICAL - the candidate's answers are RAW speech-to-text. Expect false "
     "starts, filler, run-on fragments, and outright misrecognitions (nonsense "
     "phrases the candidate never actually said, such as random unrelated "

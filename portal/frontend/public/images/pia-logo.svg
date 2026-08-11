@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 110" role="img" aria-labelledby="title">
+  <title id="title">PIA Pakistan International Airlines</title>
+  <rect width="110" height="110" rx="4" fill="#005c4a"/>
+  <path d="M29 28a29 29 0 1 0 30 47A34 34 0 1 1 29 28Z" fill="#fff"/>
+  <path d="m72 30 4.6 11.6 12.4.7-9.5 8 3.1 12-10.6-6.6-10.5 6.6 3-12-9.4-8 12.4-.7Z" fill="#c9a35c"/>
+  <text x="128" y="55" fill="#005c4a" font-family="Arial, Helvetica, sans-serif" font-size="43" font-weight="700" letter-spacing="-2">PIA</text>
+  <text x="130" y="77" fill="#38695e" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">PAKISTAN INTERNATIONAL</text>
+</svg>

@@ -28,7 +28,7 @@ _PROVIDERS = {
         "rpm": 30,        # requests per minute
     },
     "ollama": {
-        "base_url": "http://localhost:11434/v1",
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
         "api_key": "ollama",  # dummy; Ollama ignores it
         "model": os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q3_K_M"),
         "tpm": 10**9,     # effectively unlimited

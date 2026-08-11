@@ -100,7 +100,14 @@ export class Proctor {
   async initCamera() {
     this.camStream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, facingMode: "user" },
-      audio: true,
+      // The interview page records this same track.  Ask the browser's audio
+      // processing pipeline to remove speaker echo before it reaches the VAD
+      // or Whisper (headphones are still preferable, but not required).
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
     });
     if (this.videoEl) {
       this.videoEl.srcObject = this.camStream;

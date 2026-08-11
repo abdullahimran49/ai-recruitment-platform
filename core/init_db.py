@@ -15,8 +15,9 @@ import sys
 from sqlalchemy import select, text
 
 from core import db as core_db
-from core.models import Base, Candidate, Department, PipelineStage, User
-from core.security import hash_password
+from core.models import (Applicant, Base, Candidate, Department, PipelineStage,
+                         User)
+from core.security import hash_password, protect_cnic
 
 SEED_DEPARTMENTS = ["Engineering", "Data & AI", "Human Resources"]
 SUPER_ADMIN_EMAIL = "superadmin@ats.local"
@@ -114,6 +115,17 @@ def _ensure_columns():
          "NVARCHAR(500) NOT NULL DEFAULT ''" if is_mssql
          else "VARCHAR(500) NOT NULL DEFAULT ''"),
         ("candidates", "stage_id", "INT NULL"),
+        # Admin-selected languages allowed during an AI voice interview.
+        # NULL means English for interviews created before this feature.
+        ("ai_interviews", "languages",
+         "NVARCHAR(MAX) NULL" if is_mssql else "JSON NULL"),
+        # Existing OTPs become intentionally unusable legacy codes; every new
+        # code is tied to one action and one assessment/interview/account.
+        ("otps", "purpose",
+         "NVARCHAR(40) NOT NULL DEFAULT 'legacy'" if is_mssql
+         else "VARCHAR(40) NOT NULL DEFAULT 'legacy'"),
+        ("otps", "resource_id",
+         "NVARCHAR(64) NULL" if is_mssql else "VARCHAR(64) NULL"),
     ]
     with core_db.engine.begin() as conn:
         for table, column, ddl in additions:
@@ -157,6 +169,50 @@ def _create_database():
         with core_db.engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         print(f"Database '{core_db.DB_NAME}' already exists ({e}).")
+
+
+def _protect_applicant_cnics():
+    """Widen the identity column and replace legacy plaintext CNICs."""
+    if _dialect() == "mssql":
+        with core_db.engine.begin() as conn:
+            conn.execute(text("""
+                DECLARE @constraint sysname;
+                SELECT TOP 1 @constraint = kc.name
+                FROM sys.key_constraints kc
+                JOIN sys.index_columns ic
+                  ON ic.object_id = kc.parent_object_id
+                 AND ic.index_id = kc.unique_index_id
+                JOIN sys.columns c
+                  ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                WHERE kc.parent_object_id = OBJECT_ID('applicants')
+                  AND kc.type = 'UQ' AND c.name = 'cnic';
+                IF @constraint IS NOT NULL
+                  EXEC('ALTER TABLE applicants DROP CONSTRAINT ['
+                       + @constraint + ']');
+                ALTER TABLE applicants ALTER COLUMN cnic NVARCHAR(80) NOT NULL;
+                IF NOT EXISTS (
+                  SELECT 1 FROM sys.key_constraints
+                  WHERE parent_object_id = OBJECT_ID('applicants')
+                    AND name = 'uq_applicants_cnic_secure')
+                  ALTER TABLE applicants ADD CONSTRAINT uq_applicants_cnic_secure
+                    UNIQUE (cnic);
+            """))
+    else:
+        with core_db.engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE applicants MODIFY cnic VARCHAR(80) NOT NULL"))
+    with core_db.session() as db:
+        rows = db.execute(select(Applicant)).scalars().all()
+        changed = 0
+        for applicant in rows:
+            if ":" not in applicant.cnic:
+                digits = "".join(char for char in applicant.cnic
+                                 if char.isdigit())
+                if len(digits) == 13:
+                    applicant.cnic = protect_cnic(digits)
+                    changed += 1
+        if changed:
+            print(f"Protected CNIC for {changed} applicant(s).")
 
 
 def _seed_pipeline_stages():
@@ -205,6 +261,7 @@ def main():
     Base.metadata.create_all(core_db.engine)
     print("Tables created.")
     _ensure_columns()
+    _protect_applicant_cnics()
 
     with core_db.session() as s:
         for name in SEED_DEPARTMENTS:

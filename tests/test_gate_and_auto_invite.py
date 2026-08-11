@@ -130,6 +130,51 @@ def test_the_gate_can_be_switched_off(client, admin_headers, make_job,
     assert r.status_code == 200, r.text
 
 
+def test_admin_selects_multiple_interview_languages(
+        client, admin_headers, make_job, make_candidate):
+    job = make_job()
+    _cfg(client, admin_headers, job, require_test_pass=False)
+    cand = make_candidate(job)
+    r = client.post("/api/admin/ai-interviews", headers=admin_headers, json={
+        "candidate_uuid": cand,
+        "job_uuid": job,
+        "scheduled_at": "2026-09-01T10:00:00",
+        "duration_minutes": 20,
+        "num_questions": 5,
+        "languages": ["ur", "en", "ur"],
+    })
+    assert r.status_code == 200, r.text
+    iv_uuid = r.json()["uuid"]
+
+    rows = client.get(f"/api/admin/jobs/{job}/ai-interviews",
+                      headers=admin_headers).json()
+    row = next(item for item in rows if item["uuid"] == iv_uuid)
+    assert [item["code"] for item in row["languages"]] == ["ur", "en"]
+    assert row["languages"][0]["tts_locale"] == "ur-PK"
+
+    public_info = client.get(
+        f"/api/portal/interview/{iv_uuid}/info").json()
+    assert [item["label"] for item in public_info["languages"]] == [
+        "Urdu", "English"]
+
+
+def test_interview_languages_require_a_supported_selection(
+        client, admin_headers, make_job, make_candidate):
+    job = make_job()
+    _cfg(client, admin_headers, job, require_test_pass=False)
+    base = {
+        "candidate_uuid": make_candidate(job),
+        "job_uuid": job,
+        "scheduled_at": "2026-09-01T10:00:00",
+    }
+    empty = client.post("/api/admin/ai-interviews", headers=admin_headers,
+                        json={**base, "languages": []})
+    unknown = client.post("/api/admin/ai-interviews", headers=admin_headers,
+                          json={**base, "languages": ["xx"]})
+    assert empty.status_code == 422
+    assert unknown.status_code == 422
+
+
 # ---- auto-invite -------------------------------------------------------------
 
 def test_auto_invite_is_off_by_default(client, admin_headers, make_job,

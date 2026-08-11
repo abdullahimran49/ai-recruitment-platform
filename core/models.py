@@ -51,6 +51,8 @@ class User(Base):
         ForeignKey("departments.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    department: Mapped["Department | None"] = relationship()
+
     department: Mapped["Department | None"] = relationship(back_populates="users")
 
 
@@ -76,6 +78,7 @@ class Job(Base):
     employment_type: Mapped[str] = mapped_column(String(60), default="")  # Full-time | ...
     openings: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     department: Mapped["Department"] = relationship(back_populates="jobs")
     candidates: Mapped[list["Candidate"]] = relationship(back_populates="job")
@@ -84,6 +87,9 @@ class Job(Base):
         back_populates="job", order_by="QuestionBankCategory.sort_order")
     bank_items: Mapped[list["QuestionBankItem"]] = relationship(
         back_populates="job")
+    email_templates: Mapped[list["EmailTemplate"]] = relationship(back_populates="job")
+    interviews: Mapped[list["Interview"]] = relationship(back_populates="job")
+    ai_interviews: Mapped[list["AIInterview"]] = relationship(back_populates="job")
 
 
 class QuestionBankCategory(Base):
@@ -310,6 +316,8 @@ class Otp(Base):
     __tablename__ = "otps"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), index=True)
+    purpose: Mapped[str] = mapped_column(String(40), default="legacy")
+    resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     code_hash: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -349,6 +357,8 @@ class AIInterview(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=20)
     num_questions: Mapped[int] = mapped_column(Integer, default=5)
     focus: Mapped[str] = mapped_column(String(500), default="")
+    languages: Mapped[list | None] = mapped_column(
+        JSON, nullable=True, default=lambda: ["en"])
     max_warnings: Mapped[int] = mapped_column(Integer, default=3)
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
     # scheduled -> started -> completed | terminated | missed | cancelled
@@ -367,7 +377,7 @@ class AIInterview(Base):
 
     candidate: Mapped["Candidate"] = relationship(
         back_populates="interviews_ai")
-    job: Mapped["Job"] = relationship()
+    job: Mapped["Job"] = relationship(back_populates="ai_interviews")
     events: Mapped[list["InterviewEvent"]] = relationship(
         back_populates="interview")
 
@@ -407,6 +417,8 @@ class EmailTemplate(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow)
 
+    job: Mapped["Job | None"] = relationship(back_populates="email_templates")
+
 
 class Interview(Base):
     """Interview invitation sent by admin to a candidate."""
@@ -426,7 +438,7 @@ class Interview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     candidate: Mapped["Candidate"] = relationship(back_populates="interviews")
-    job: Mapped["Job"] = relationship()
+    job: Mapped["Job"] = relationship(back_populates="interviews")
 
 
 class Applicant(Base):
@@ -439,7 +451,8 @@ class Applicant(Base):
     """
     __tablename__ = "applicants"
     uuid: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    cnic: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    # last-four + keyed HMAC; the raw national identifier is never stored.
+    cnic: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), default="")
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     phone: Mapped[str] = mapped_column(String(50), default="")
@@ -488,3 +501,4 @@ class Scorecard(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     candidate: Mapped["Candidate"] = relationship(back_populates="scorecards")
+    author: Mapped["User"] = relationship()

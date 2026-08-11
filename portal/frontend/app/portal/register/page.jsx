@@ -8,7 +8,10 @@ import { apiSend, saveApplicantSession } from "@/lib/api";
 function RegisterForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/portal/dashboard";
+  const requestedNext = params.get("next") || "";
+  const next = (requestedNext.startsWith("/portal/")
+                && !requestedNext.startsWith("//"))
+    ? requestedNext : "/portal/dashboard";
 
   const [form, setForm] = useState({
     name: "", email: "", cnic: "", phone: "", password: "", confirm: "",
